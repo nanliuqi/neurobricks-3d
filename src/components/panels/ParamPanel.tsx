@@ -338,6 +338,10 @@ export default function ParamPanel() {
         </span>
       </div>
 
+      <div style={{ fontSize: '10px', color: '#64748b', marginBottom: '4px' }}>
+        换位：Shift+↑↓ 快捷键 或 点击下方按钮
+      </div>
+
       {/* 换位按钮 */}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
         <button

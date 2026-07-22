@@ -5,7 +5,8 @@ interface HelpPanelProps {
 const SHORTCUTS = [
   { key: 'Delete / Backspace', desc: '删除选中积木' },
   { key: 'Escape', desc: '取消选择' },
-  { key: '↑ / ↓', desc: '上下导航层' },
+  { key: '↑ / ↓', desc: '上下导航层（切换选中）' },
+  { key: 'Shift + ↑ / ↓', desc: '上移/下移选中积木（换位）' },
   { key: 'F12', desc: '开发者工具（仅 dev 模式）' },
 ];
 

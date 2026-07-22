@@ -189,8 +189,20 @@ def validate_model(model, input_shape, device):
             message=f"Model validation OK: input {list(input_shape)} -> output {list(output.shape)}")
         return True
     except RuntimeError as e:
+        error_str = str(e)
+        # 尝试从错误信息中提取有用的线索
+        hint = ""
+        if "size mismatch" in error_str.lower() or "mat1 and mat2" in error_str.lower():
+            hint = "提示：这通常是因为 Linear 层的 inFeatures 与前一层的输出不匹配。建议：1) 检查 Input 层是否已适配当前数据集；2) 在 Linear 层前确保有 Flatten；3) 手动计算前面卷积/池化层输出的特征数，更新 Linear 的 inFeatures。"
+        elif "expected input" in error_str.lower() and "channels" in error_str.lower():
+            hint = "提示：卷积层的 inChannels 与前一层的 outChannels 不匹配。请检查相邻 Conv2D 层的通道数是否对应。"
+        elif "negative" in error_str.lower() or "zero" in error_str.lower():
+            hint = "提示：特征图尺寸缩小到 0 或负数。可能池化层太多或卷积核太大。尝试减少池化层、增大 padding 或减小 kernel size。"
+        else:
+            hint = "建议检查网络结构：1) Input 层尺寸是否与数据集匹配；2) Linear 前是否有 Flatten；3) 相邻层的通道/特征数是否对应。"
+
         log_message("error", 
-            message=f"模型形状不匹配：{e}。请检查网络层参数，确保特征图不会缩小到 0。可能需要减少池化层或添加 padding。")
+            message=f"模型形状不匹配：{e}\n\n{hint}")
         return False
 
 def train(model_and_shape, config):

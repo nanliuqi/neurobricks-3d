@@ -1,15 +1,9 @@
 import { useLayerStore } from '../../stores/useLayerStore';
 import type { ShapeValidationError } from '../../types/layer';
-import { LAYER_META_LIST } from '../../types/layer';
 
 const ErrorPanel = () => {
   const validationResult = useLayerStore(state => state.validationResult);
   const setSelectedId = useLayerStore(state => state.setSelectedId);
-
-  const getLayerLabel = (layerType: string): string => {
-    const meta = LAYER_META_LIST.find(m => m.type === layerType);
-    return meta ? meta.label : layerType;
-  };
 
   const errorCount = validationResult.errors.length;
   const warningCount = validationResult.warnings?.length || 0;
@@ -56,9 +50,13 @@ const ErrorPanel = () => {
       }}>
         {/* 无错误 */}
         {errorCount === 0 && warningCount === 0 && (
-          <div style={{ color: '#10b981', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px', padding: '4px 0' }}>
-            <span>✓</span>
-            <span>网络结构正确</span>
+          <div style={{
+            padding: '12px',
+            color: '#6ee7b7',
+            fontSize: '12px',
+            textAlign: 'center',
+          }}>
+            ✓ 网络结构校验通过
           </div>
         )}
 
@@ -77,34 +75,86 @@ const ErrorPanel = () => {
           </div>
         ))}
 
-        {/* 错误 - 紧凑模式 */}
-        {validationResult.errors.map((error: ShapeValidationError, index: number) => (
-          <div
-            key={error.layerId || index}
-            onClick={() => error.layerId && setSelectedId(error.layerId)}
-            style={{
-              padding: '4px 8px',
-              marginBottom: '3px',
-              backgroundColor: 'rgba(239, 68, 68, 0.1)',
-              borderLeft: '3px solid #ef4444',
-              borderRadius: '3px',
-              cursor: error.layerId ? 'pointer' : 'default',
-              fontSize: '10px',
-            }}
-          >
-            <div style={{ color: '#fca5a5', fontWeight: 600, marginBottom: '1px' }}>
-              {getLayerLabel(error.layerType)} {error.layerId ? `·${error.layerId.substring(0, 6)}` : ''}
-            </div>
-            <div style={{ color: '#f87171' }}>
-              {error.message}
-            </div>
-            {error.suggestion && (
-              <div style={{ color: '#fbbf24', fontStyle: 'italic', marginTop: '1px' }}>
-                💡 {error.suggestion}
+        {/* 错误 - 形状对比模式 */}
+        {validationResult.errors.map((error: ShapeValidationError, index: number) => {
+          const hasShapeCompare = error.expectedInputShape && error.actualInputShape;
+
+          return (
+            <div
+              key={error.layerId || index}
+              onClick={() => error.layerId && setSelectedId(error.layerId)}
+              style={{
+                padding: '10px',
+                backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                borderRadius: '6px',
+                marginBottom: '8px',
+                cursor: error.layerId ? 'pointer' : 'default',
+              }}
+            >
+              {/* 层类型 + 错误类型标签 */}
+              <div style={{ display: 'flex', gap: '6px', marginBottom: '6px', alignItems: 'center' }}>
+                <span style={{ color: '#fca5a5', fontSize: '12px', fontWeight: 600 }}>
+                  {error.layerType} {error.layerId ? `· ${error.layerId.substring(0, 6)}` : ''}
+                </span>
+                <span style={{
+                  padding: '1px 6px',
+                  borderRadius: '3px',
+                  fontSize: '9px',
+                  fontWeight: 600,
+                  backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                  color: '#fca5a5',
+                }}>
+                  {error.errorType === 'missing_flatten' ? '缺少 Flatten' :
+                   error.errorType === 'shape_mismatch' ? '形状不匹配' :
+                   error.errorType === 'invalid_dimension' ? '维度无效' : '参数冲突'}
+                </span>
               </div>
-            )}
-          </div>
-        ))}
+
+              {/* 形状对比（如果有） */}
+              {hasShapeCompare && (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  marginBottom: '6px',
+                  fontFamily: 'monospace',
+                  fontSize: '11px',
+                }}>
+                  <span style={{
+                    padding: '2px 6px',
+                    borderRadius: '3px',
+                    backgroundColor: 'rgba(63, 185, 80, 0.15)',
+                    color: '#6ee7b7',
+                  }}>
+                    期望: [{error.expectedInputShape!.join(', ')}]
+                  </span>
+                  <span style={{ color: '#64748b' }}>→</span>
+                  <span style={{
+                    padding: '2px 6px',
+                    borderRadius: '3px',
+                    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                    color: '#fca5a5',
+                  }}>
+                    实际: [{error.actualInputShape!.join(', ')}]
+                  </span>
+                </div>
+              )}
+
+              {/* 错误消息 */}
+              <div style={{ color: '#94a3b8', fontSize: '11px', lineHeight: '1.5', marginBottom: hasShapeCompare ? '4px' : '6px' }}>
+                {error.message}
+              </div>
+
+              {/* 修复建议 */}
+              {error.suggestion && (
+                <div style={{ color: '#60a5fa', fontSize: '10px', marginTop: '4px' }}>
+                  💡 {error.suggestion}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

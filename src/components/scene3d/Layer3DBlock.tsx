@@ -143,6 +143,15 @@ export default function Layer3DBlock({ layer }: Layer3DBlockProps) {
           e.stopPropagation();
           setSelectedId(layer.id);
         }}
+        onContextMenu={(e) => {
+          e.stopPropagation();
+          e.nativeEvent.preventDefault();
+          setSelectedId(layer.id);
+          // 通过自定义事件通知 NeuroScene 显示右键菜单
+          window.dispatchEvent(new CustomEvent('layer-context-menu', {
+            detail: { x: e.nativeEvent.clientX, y: e.nativeEvent.clientY, layerId: layer.id }
+          }));
+        }}
       >
         <meshStandardMaterial
           color={color}

@@ -64,6 +64,7 @@ export default function NeuroScene() {
   const isPaused = useTrainingStore(state => state.isPaused);
   const currentEpoch = useTrainingStore(state => state.currentEpoch);
   const prevEpochRef = useRef(0);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; layerId: string } | null>(null);
 
   // 按 order 排序层
   const sortedLayers = [...layers].sort((a, b) => a.order - b.order);
@@ -139,7 +140,18 @@ export default function NeuroScene() {
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+
+    // 右键菜单事件
+    const handleContextMenu = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      setContextMenu({ x: detail.x, y: detail.y, layerId: detail.layerId });
+    };
+    window.addEventListener('layer-context-menu', handleContextMenu);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('layer-context-menu', handleContextMenu);
+    };
   }, []);
 
   return (
@@ -217,6 +229,7 @@ export default function NeuroScene() {
               from={layer.position}
               to={nextLayer.position}
               hasError={hasError}
+              isTraining={isTraining && !isPaused}
             />
           );
         }
@@ -231,6 +244,80 @@ export default function NeuroScene() {
       {/* 相机控制器 */}
       <CameraControlsBridge />
     </Canvas>
+
+      {/* 右键菜单 */}
+      {contextMenu && (
+        <>
+          {/* 透明遮罩，点击关闭菜单 */}
+          <div
+            onClick={() => setContextMenu(null)}
+            onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }}
+            style={{ position: 'fixed', inset: 0, zIndex: 1000 }}
+          />
+          {/* 菜单 */}
+          <div
+            style={{
+              position: 'fixed',
+              left: contextMenu.x,
+              top: contextMenu.y,
+              zIndex: 1001,
+              backgroundColor: '#1e293b',
+              border: '1px solid #334155',
+              borderRadius: '6px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+              padding: '4px',
+              minWidth: '160px',
+            }}
+          >
+            <ContextMenuItem label="⇈ 上移" onClick={() => {
+              const store = useLayerStore.getState();
+              const layer = store.layers.find(l => l.id === contextMenu.layerId);
+              if (layer && layer.order > 0) store.moveLayer(contextMenu.layerId, layer.order - 1);
+              setContextMenu(null);
+            }} />
+            <ContextMenuItem label="⇩ 下移" onClick={() => {
+              const store = useLayerStore.getState();
+              const layer = store.layers.find(l => l.id === contextMenu.layerId);
+              if (layer && layer.order < store.layers.length - 1) store.moveLayer(contextMenu.layerId, layer.order + 1);
+              setContextMenu(null);
+            }} />
+            <ContextMenuItem label="复制此层" onClick={() => {
+              const store = useLayerStore.getState();
+              const layer = store.layers.find(l => l.id === contextMenu.layerId);
+              if (layer) {
+                const nextY = (store.layers.length) * 1.3 + 0.5;
+                store.addLayer(layer.type, [0, nextY, 0]);
+              }
+              setContextMenu(null);
+            }} />
+            <div style={{ height: '1px', backgroundColor: '#334155', margin: '4px 0' }} />
+            <ContextMenuItem label="🗑 删除" danger onClick={() => {
+              useLayerStore.getState().removeLayer(contextMenu.layerId);
+              setContextMenu(null);
+            }} />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ContextMenuItem({ label, onClick, danger }: { label: string; onClick: () => void; danger?: boolean }) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        padding: '6px 12px',
+        cursor: 'pointer',
+        fontSize: '12px',
+        color: danger ? '#fca5a5' : '#e2e8f0',
+        borderRadius: '4px',
+        transition: 'background-color 0.15s',
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = danger ? 'rgba(239,68,68,0.15)' : 'rgba(59,130,246,0.15)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+    >
+      {label}
     </div>
   );
 }

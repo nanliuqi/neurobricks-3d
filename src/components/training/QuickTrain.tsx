@@ -5,6 +5,34 @@ import { useDatasetStore } from '@/stores/useDatasetStore';
 import { useGPUStore } from '@/stores/useGPUStore';
 import type { TrainConfig, OptimizerType } from '@/types/training';
 
+const STORAGE_KEY = 'neurobricks_train_config';
+
+interface SavedConfig {
+  epochs: number;
+  batchSize: number;
+  lrExponent: number;
+  optimizer: OptimizerType;
+  weightDecay: number;
+}
+
+function loadSavedConfig(): Partial<SavedConfig> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return {};
+    return JSON.parse(raw);
+  } catch {
+    return {};
+  }
+}
+
+function saveConfig(config: SavedConfig) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+  } catch {
+    // localStorage 不可用时静默忽略
+  }
+}
+
 // 模拟训练的 interval ID，存在模块级别以便暂停/恢复
 let simulationIntervalId: ReturnType<typeof setInterval> | null = null;
 
@@ -69,13 +97,16 @@ export default function QuickTrain() {
   const startTraining = useTrainingStore(state => state.startTraining);
   const datasetInfo = useDatasetStore(state => state.datasetInfo);
 
-  // 训练配置状态
-  const [epochs, setEpochs] = useState(5);
-  const [batchSize, setBatchSize] = useState(32);
-  const [lrExponent, setLrExponent] = useState(-3); // 10^-3 = 0.001
-  const [optimizer, setOptimizer] = useState<OptimizerType>('adam');
-  const [weightDecay, setWeightDecay] = useState(0);
+  // 训练配置状态（从 localStorage 恢复）
+  const saved = loadSavedConfig();
+
+  const [epochs, setEpochs] = useState(saved.epochs ?? 5);
+  const [batchSize, setBatchSize] = useState(saved.batchSize ?? 32);
+  const [lrExponent, setLrExponent] = useState(saved.lrExponent ?? -3); // 10^-3 = 0.001
+  const [optimizer, setOptimizer] = useState<OptimizerType>(saved.optimizer ?? 'adam');
+  const [weightDecay, setWeightDecay] = useState(saved.weightDecay ?? 0);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [hint, setHint] = useState<string | null>(null);
 
   const learningRate = Math.pow(10, lrExponent);
 
@@ -87,12 +118,14 @@ export default function QuickTrain() {
   // 开始训练处理
   const handleStartTraining = async () => {
     if (layers.length === 0) {
-      alert('请先添加网络层');
+      setHint('请先添加网络层');
+      setTimeout(() => setHint(null), 3000);
       return;
     }
 
     if (!datasetInfo) {
-      alert('请先在数据集面板中选择数据集');
+      setHint('请先在数据集面板中选择数据集');
+      setTimeout(() => setHint(null), 3000);
       return;
     }
 
@@ -112,6 +145,15 @@ export default function QuickTrain() {
     };
 
     try {
+      // 保存当前配置到 localStorage
+      saveConfig({
+        epochs,
+        batchSize,
+        lrExponent,
+        optimizer,
+        weightDecay,
+      });
+
       // 更新 Store 状态
       startTraining(config);
 
@@ -126,7 +168,8 @@ export default function QuickTrain() {
       }
     } catch (error) {
       console.error('Failed to start training:', error);
-      alert('启动训练失败：' + (error as Error).message);
+      setHint('启动训练失败：' + (error as Error).message);
+      setTimeout(() => setHint(null), 5000);
     }
   };
 
@@ -317,6 +360,17 @@ export default function QuickTrain() {
         >
           ⚙ 高级
         </button>
+
+        {hint && (
+          <span style={{
+            color: '#fcd34d',
+            fontSize: '12px',
+            fontWeight: 500,
+            whiteSpace: 'nowrap',
+          }}>
+            {hint}
+          </span>
+        )}
 
         {/* 开始训练按钮 */}
         <button

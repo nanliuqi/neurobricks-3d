@@ -93,6 +93,35 @@ export default function LossChart() {
     });
     ctx.stroke();
 
+    // 绘制 epoch 边界虚线
+    const epochBoundaries: Array<{ x: number; epoch: number }> = [];
+    for (let i = 1; i < metrics.length; i++) {
+      if (metrics[i].epoch !== metrics[i - 1].epoch) {
+        epochBoundaries.push({ x: toX(i), epoch: metrics[i].epoch });
+      }
+    }
+
+    if (epochBoundaries.length > 0) {
+      ctx.strokeStyle = 'rgba(100, 116, 139, 0.3)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      epochBoundaries.forEach(({ x }) => {
+        ctx.beginPath();
+        ctx.moveTo(x, padding.top);
+        ctx.lineTo(x, height - padding.bottom);
+        ctx.stroke();
+      });
+      ctx.setLineDash([]);
+
+      // 标注 epoch 编号
+      ctx.fillStyle = '#64748b';
+      ctx.font = '10px monospace';
+      ctx.textAlign = 'center';
+      epochBoundaries.forEach(({ x, epoch }) => {
+        ctx.fillText(`E${epoch}`, x, padding.top - 4);
+      });
+    }
+
     // 绘制图例
     ctx.font = '10px sans-serif';
 

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useDatasetStore } from '@/stores/useDatasetStore';
+import { useLayerStore } from '@/stores/useLayerStore';
 import type { DatasetInfo, DatasetType } from '@/types/dataset';
 
 const BUILTIN_DATASETS = [
@@ -19,7 +20,8 @@ export default function DatasetPanel() {
   // 选择内置数据集
   const handleBuiltinSelect = (datasetName: string) => {
     setSelectedBuiltin(datasetName);
-    setDataset({
+
+    const info = {
       name: datasetName.toUpperCase(),
       type: datasetName as DatasetType,
       sampleCount: datasetName === 'mnist' ? 60000 : 50000,
@@ -27,7 +29,31 @@ export default function DatasetPanel() {
       imageWidth: datasetName === 'mnist' ? 28 : 32,
       imageHeight: datasetName === 'mnist' ? 28 : 32,
       channels: datasetName === 'mnist' ? 1 : 3,
-    });
+    };
+    setDataset(info);
+
+    // 检查是否需要适配 Input 层
+    const layers = useLayerStore.getState().layers;
+    const inputLayer = layers.find(l => l.type === 'Input');
+    if (inputLayer) {
+      const p = inputLayer.params;
+      const needsUpdate =
+        p.inChannels !== info.channels ||
+        p.inputHeight !== info.imageHeight ||
+        p.inputWidth !== info.imageWidth;
+
+      if (needsUpdate) {
+        const confirmed = window.confirm(
+          `检测到 Input 层参数 (${p.inChannels}×${p.inputHeight}×${p.inputWidth}) 与数据集 ${info.name} (${info.channels}×${info.imageHeight}×${info.imageWidth}) 不匹配，是否自动适配？`
+        );
+        if (confirmed) {
+          const store = useLayerStore.getState();
+          store.updateLayerParam(inputLayer.id, 'inChannels', info.channels);
+          store.updateLayerParam(inputLayer.id, 'inputHeight', info.imageHeight);
+          store.updateLayerParam(inputLayer.id, 'inputWidth', info.imageWidth);
+        }
+      }
+    }
   };
 
   // 选择本地图像文件夹

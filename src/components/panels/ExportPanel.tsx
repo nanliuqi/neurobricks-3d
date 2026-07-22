@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useLayerStore } from '@/stores/useLayerStore';
 import { useTrainingStore } from '@/stores/useTrainingStore';
 import { generatePyTorchCode, generateKerasCode } from '@/utils/codeGenerator';
@@ -35,22 +36,35 @@ export default function ExportPanel() {
   const layers = useLayerStore(state => state.layers);
   const metrics = useTrainingStore(state => state.metrics);
 
-  const handleExportPyTorch = async () => {
+  const [previewCode, setPreviewCode] = useState<string | null>(null);
+  const [previewLang, setPreviewLang] = useState<'python' | 'keras' | null>(null);
+
+  const handlePreviewPyTorch = () => {
+    const code = generatePyTorchCode(layers);
+    setPreviewCode(code);
+    setPreviewLang('python');
+  };
+
+  const handlePreviewKeras = () => {
+    const code = generateKerasCode(layers);
+    setPreviewCode(code);
+    setPreviewLang('keras');
+  };
+
+  const handleSavePyTorch = async () => {
+    if (!previewCode) return;
     try {
-      const code = generatePyTorchCode(layers);
-      await saveFile('model.py', code, 'text/x-python');
+      await saveFile('model.py', previewCode, 'text/x-python');
     } catch (error) {
-      console.error('Failed to export PyTorch code:', error);
       alert('导出失败：' + (error as Error).message);
     }
   };
 
-  const handleExportKeras = async () => {
+  const handleSaveKeras = async () => {
+    if (!previewCode) return;
     try {
-      const code = generateKerasCode(layers);
-      await saveFile('model_keras.py', code, 'text/x-python');
+      await saveFile('model_keras.py', previewCode, 'text/x-python');
     } catch (error) {
-      console.error('Failed to export Keras code:', error);
       alert('导出失败：' + (error as Error).message);
     }
   };
@@ -122,6 +136,25 @@ export default function ExportPanel() {
     }
   };
 
+  const handleExportLogsTxt = async () => {
+    try {
+      const logs = useTrainingStore.getState().logs;
+      if (!logs || logs.length === 0) {
+        alert('暂无训练日志可导出');
+        return;
+      }
+      const lines = logs.map(log => {
+        const time = new Date(log.timestamp).toLocaleTimeString('zh-CN', { hour12: false });
+        return `[${time}] [${log.level.toUpperCase()}] ${log.message}`;
+      });
+      const content = `NeuroBricks 3D 训练日志\n导出时间: ${new Date().toLocaleString('zh-CN')}\n共 ${logs.length} 条日志\n${'='.repeat(50)}\n\n${lines.join('\n')}`;
+      await saveFile('training_log.txt', content, 'text/plain');
+    } catch (error) {
+      console.error('Failed to export logs:', error);
+      alert('导出失败：' + (error as Error).message);
+    }
+  };
+
   const handleExportChart = async () => {
     alert('📈 曲线图导出功能开发中');
   };
@@ -133,7 +166,7 @@ export default function ExportPanel() {
       </div>
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '10px' }}>
-        <button onClick={handleExportPyTorch} disabled={layers.length === 0}
+        <button onClick={handlePreviewPyTorch} disabled={layers.length === 0}
           style={{ padding: '12px', backgroundColor: layers.length === 0 ? '#475569' : '#1e40af', color: 'white', border: 'none', borderRadius: '6px', cursor: layers.length === 0 ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 600, textAlign: 'left', display: 'flex', alignItems: 'center', gap: '8px' }}
           onMouseEnter={e => { if (layers.length > 0) e.currentTarget.style.backgroundColor = '#1e3a8a'; }}
           onMouseLeave={e => { if (layers.length > 0) e.currentTarget.style.backgroundColor = '#1e40af'; }}
@@ -141,7 +174,7 @@ export default function ExportPanel() {
           <span style={{ fontSize: '16px' }}>🐍</span><span>导出 PyTorch 代码</span>
         </button>
 
-        <button onClick={handleExportKeras} disabled={layers.length === 0}
+        <button onClick={handlePreviewKeras} disabled={layers.length === 0}
           style={{ padding: '12px', backgroundColor: layers.length === 0 ? '#475569' : '#047857', color: 'white', border: 'none', borderRadius: '6px', cursor: layers.length === 0 ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 600, textAlign: 'left', display: 'flex', alignItems: 'center', gap: '8px' }}
           onMouseEnter={e => { if (layers.length > 0) e.currentTarget.style.backgroundColor = '#065f46'; }}
           onMouseLeave={e => { if (layers.length > 0) e.currentTarget.style.backgroundColor = '#047857'; }}
@@ -187,12 +220,84 @@ export default function ExportPanel() {
           <span style={{ fontSize: '16px' }}>📊</span><span>导出训练日志</span>
         </button>
 
+        <button onClick={handleExportLogsTxt} disabled={!metrics || metrics.length === 0}
+          style={{ padding: '12px', backgroundColor: !metrics || metrics.length === 0 ? '#475569' : '#d97706', color: 'white', border: 'none', borderRadius: '6px', cursor: !metrics || metrics.length === 0 ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 600, textAlign: 'left', display: 'flex', alignItems: 'center', gap: '8px' }}
+          onMouseEnter={e => { if (metrics && metrics.length > 0) e.currentTarget.style.backgroundColor = '#b45309'; }}
+          onMouseLeave={e => { if (metrics && metrics.length > 0) e.currentTarget.style.backgroundColor = '#d97706'; }}
+        >
+          <span style={{ fontSize: '16px' }}>📄</span><span>导出训练日志 (.txt)</span>
+        </button>
+
         <button onClick={handleExportChart} disabled={true}
           style={{ padding: '12px', backgroundColor: '#475569', color: '#94a3b8', border: 'none', borderRadius: '6px', cursor: 'not-allowed', fontSize: '13px', fontWeight: 600, textAlign: 'left', display: 'flex', alignItems: 'center', gap: '8px' }}
         >
           <span style={{ fontSize: '16px' }}>📈</span><span>导出曲线图（开发中）</span>
         </button>
       </div>
+
+      {/* 代码预览区域 */}
+      {previewCode && (
+        <div style={{ marginBottom: '12px', marginTop: '12px' }}>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '6px',
+          }}>
+            <span style={{ color: '#94a3b8', fontSize: '11px', fontWeight: 600 }}>
+              代码预览 ({previewLang === 'python' ? 'PyTorch' : 'Keras'})
+            </span>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button
+                onClick={previewLang === 'python' ? handleSavePyTorch : handleSaveKeras}
+                style={{
+                  padding: '4px 12px',
+                  backgroundColor: '#10b981',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                }}
+              >
+                保存到文件
+              </button>
+              <button
+                onClick={() => { setPreviewCode(null); setPreviewLang(null); }}
+                style={{
+                  padding: '4px 12px',
+                  backgroundColor: '#475569',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '11px',
+                }}
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+          <pre style={{
+            backgroundColor: '#0f172a',
+            border: '1px solid #1a3a5c',
+            borderRadius: '6px',
+            padding: '10px',
+            maxHeight: '300px',
+            overflow: 'auto',
+            fontSize: '11px',
+            fontFamily: 'monospace',
+            color: '#e2e8f0',
+            lineHeight: '1.5',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            margin: 0,
+          }}>
+            {previewCode}
+          </pre>
+        </div>
+      )}
 
       <div style={{ marginTop: '12px', padding: '10px', backgroundColor: '#0f3460', borderRadius: '6px', fontSize: '11px', color: '#94a3b8', lineHeight: '1.5' }}>
         💡 提示：<br />
