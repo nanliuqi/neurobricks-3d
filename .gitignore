@@ -13,9 +13,10 @@ __pycache__/
 .venv/
 venv/
 
-# IDE
-.vscode/settings.json
-.idea/
+# PyInstaller build artifacts
+src-tauri/sidecars/build/
+src-tauri/sidecars/dist/
+src-tauri/sidecars/*.spec
 
 # OS
 Thumbs.db
