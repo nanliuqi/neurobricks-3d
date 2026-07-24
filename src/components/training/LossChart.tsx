@@ -1,16 +1,21 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useCallback } from 'react';
 import { useTrainingStore } from '../../stores/useTrainingStore';
+import type { TrainMetric } from '@/types/training';
 
 /**
  * 简易 Loss/Accuracy 曲线图
  * 使用 Canvas 直接绘制，无需 echarts 依赖
+ * 用 requestAnimationFrame 节流，每帧最多重绘一次
  */
 export default function LossChart() {
   const metrics = useTrainingStore(state => state.metrics);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const metricsRef = useRef(metrics);
+  const rafRef = useRef<number | null>(null);
 
-  useEffect(() => {
+  // 绘制函数（从原 useEffect 中提取）
+  const drawChart = useCallback((data: TrainMetric[]) => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
     if (!canvas || !container) return;
@@ -36,7 +41,7 @@ export default function LossChart() {
     ctx.fillStyle = '#0f3460';
     ctx.fillRect(0, 0, width, height);
 
-    if (metrics.length < 2) {
+    if (data.length < 2) {
       ctx.fillStyle = '#94a3b8';
       ctx.font = '12px sans-serif';
       ctx.textAlign = 'center';
@@ -49,7 +54,7 @@ export default function LossChart() {
     const plotHeight = height - padding.top - padding.bottom;
 
     // 计算数据范围
-    const losses = metrics.map(m => m.loss);
+    const losses = data.map(m => m.loss);
     const maxLoss = Math.max(...losses, 0.1);
     const minLoss = 0;
 
@@ -65,7 +70,7 @@ export default function LossChart() {
     }
 
     // 辅助函数：数据点 → 画布坐标
-    const toX = (index: number) => padding.left + (index / (metrics.length - 1)) * plotWidth;
+    const toX = (index: number) => padding.left + (index / (data.length - 1)) * plotWidth;
     const toYLoss = (loss: number) => padding.top + (1 - (loss - minLoss) / (maxLoss - minLoss)) * plotHeight;
     const toYAcc = (acc: number) => padding.top + (1 - acc) * plotHeight;
 
@@ -73,7 +78,7 @@ export default function LossChart() {
     ctx.strokeStyle = '#3b82f6';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    metrics.forEach((m, i) => {
+    data.forEach((m, i) => {
       const x = toX(i);
       const y = toYLoss(m.loss);
       if (i === 0) ctx.moveTo(x, y);
@@ -85,7 +90,7 @@ export default function LossChart() {
     ctx.strokeStyle = '#f59e0b';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    metrics.forEach((m, i) => {
+    data.forEach((m, i) => {
       const x = toX(i);
       const y = toYAcc(m.accuracy);
       if (i === 0) ctx.moveTo(x, y);
@@ -95,9 +100,9 @@ export default function LossChart() {
 
     // 绘制 epoch 边界虚线
     const epochBoundaries: Array<{ x: number; epoch: number }> = [];
-    for (let i = 1; i < metrics.length; i++) {
-      if (metrics[i].epoch !== metrics[i - 1].epoch) {
-        epochBoundaries.push({ x: toX(i), epoch: metrics[i].epoch });
+    for (let i = 1; i < data.length; i++) {
+      if (data[i].epoch !== data[i - 1].epoch) {
+        epochBoundaries.push({ x: toX(i), epoch: data[i].epoch });
       }
     }
 
@@ -145,15 +150,35 @@ export default function LossChart() {
     ctx.fillText('0', padding.left - 5, padding.top + plotHeight + 4);
 
     // 最新值标注
-    const latest = metrics[metrics.length - 1];
+    const latest = data[data.length - 1];
     ctx.fillStyle = '#3b82f6';
     ctx.textAlign = 'left';
     ctx.fillText(latest.loss.toFixed(4), width - padding.right + 5, toYLoss(latest.loss) + 3);
 
     ctx.fillStyle = '#f59e0b';
     ctx.fillText(`${(latest.accuracy * 100).toFixed(1)}%`, width - padding.right + 5, toYAcc(latest.accuracy) + 3);
+  }, []);
 
-  }, [metrics]);
+  // metrics 变化时通过 RAF 节流重绘（每帧最多一次）
+  useEffect(() => {
+    metricsRef.current = metrics;
+
+    if (rafRef.current === null) {
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = null;
+        drawChart(metricsRef.current);
+      });
+    }
+  }, [metrics, drawChart]);
+
+  // 清理动画帧
+  useEffect(() => {
+    return () => {
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+      }
+    };
+  }, []);
 
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%' }}>
