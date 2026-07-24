@@ -78,9 +78,18 @@ export default function App() {
     }
   }, [layers.length]);
 
-  // Tauri 训练事件监听
+  // Tauri 训练事件监听 + 心跳超时保护
   useEffect(() => {
     let unlisteners: (() => void)[] = [];
+    let lastProgressTime = Date.now();
+
+    // 心跳检测：每 15 秒检查一次，60 秒无任何进度更新则判定超时
+    const heartbeatTimer = setInterval(() => {
+      const store = useTrainingStore.getState();
+      if (store.isTraining && Date.now() - lastProgressTime > 60000) {
+        store.setError('训练超时：60 秒内无进度更新，训练进程可能已停止响应');
+      }
+    }, 15000);
 
     (async () => {
       try {
@@ -89,6 +98,9 @@ export default function App() {
         unlisteners.push(await listen('training-progress', (event) => {
           const data = event.payload as any;
           const store = useTrainingStore.getState();
+
+          // 更新心跳时间戳
+          lastProgressTime = Date.now();
 
           if (data.type === 'progress') {
             store.updateProgress({
@@ -137,6 +149,7 @@ export default function App() {
 
     return () => {
       unlisteners.forEach((unlisten) => unlisten());
+      clearInterval(heartbeatTimer);
     };
   }, []);
 

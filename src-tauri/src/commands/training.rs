@@ -231,9 +231,23 @@ pub fn start_training(
         }
 
         // stdout 关闭 = 进程已结束
-        // 无论正常完成还是崩溃，都发 done 让前端结束训练状态
-        // Python 崩溃时的 error 事件已由 {"type":"error"} 在循环中处理
-        // 如果没收到 error 也没收到 done，说明进程异常终止，也需要通知前端
+        // 检查进程退出状态，异常退出时发送 error 事件
+        let exit_status = state_clone.lock().unwrap()
+            .child_process.as_mut()
+            .and_then(|c| c.try_wait().ok().flatten());
+
+        if let Some(status) = exit_status {
+            if !status.success() {
+                let _ = app_clone.get_window("main").and_then(|w| {
+                    w.emit("training-error", &serde_json::json!({
+                        "type": "error",
+                        "message": "训练进程异常退出，请检查网络结构是否正确"
+                    })).ok()
+                });
+            }
+        }
+
+        // 无论正常还是异常，都发 done 让前端结束训练状态
         let _ = app_clone.get_window("main").and_then(|w| w.emit("training-done", &serde_json::json!({})).ok());
     });
 

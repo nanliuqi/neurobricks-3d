@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useLayerStore } from '@/stores/useLayerStore';
 import type { LayerType } from '@/types/layer';
 import { LAYER_META_LIST } from '@/types/layer';
@@ -460,6 +460,30 @@ interface ParamFieldProps {
 
 function ParamField({ label, value, onChange, min, max, step, savedField, fieldName }: ParamFieldProps) {
   const isSaved = savedField === fieldName;
+  const [localValue, setLocalValue] = useState(value);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 同步外部变化（如加载项目 / 适配数据集时 store 直接修改 params）
+  useEffect(() => {
+    setLocalValue(value);
+  }, [value]);
+
+  const handleChange = (newValue: number) => {
+    setLocalValue(newValue);
+    // 防抖 300ms：停止输入后才触发全网络重算
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      debounceRef.current = null;
+      onChange(newValue);
+    }, 300);
+  };
+
+  // 卸载时清理 timer
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
 
   return (
     <div style={{ marginBottom: '12px' }}>
@@ -468,8 +492,8 @@ function ParamField({ label, value, onChange, min, max, step, savedField, fieldN
       </label>
       <input
         type="number"
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
+        value={localValue}
+        onChange={(e) => handleChange(Number(e.target.value))}
         min={min}
         max={max}
         step={step || 1}
@@ -489,6 +513,12 @@ function ParamField({ label, value, onChange, min, max, step, savedField, fieldN
         }}
         onBlur={(e) => {
           e.currentTarget.style.borderColor = isSaved ? '#10b981' : '#1a3a5c';
+          // 失焦时立即同步（不等防抖）
+          if (debounceRef.current) {
+            clearTimeout(debounceRef.current);
+            debounceRef.current = null;
+          }
+          onChange(localValue);
         }}
       />
     </div>
