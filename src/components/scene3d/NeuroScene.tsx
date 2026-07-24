@@ -9,7 +9,7 @@ import GradientOverlay from './GradientOverlay';
 import ShapeTooltip from './ShapeTooltip';
 import DataFlowParticles from './DataFlowParticles';
 import TrainResultModal from '../training/TrainResultModal';
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState, useMemo } from 'react';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 
 const INITIAL_CAMERA_POS = [0, 8, 12] as const;
@@ -67,8 +67,8 @@ export default function NeuroScene() {
   const prevEpochRef = useRef(0);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; layerId: string } | null>(null);
 
-  // 按 order 排序层
-  const sortedLayers = [...layers].sort((a, b) => a.order - b.order);
+  // 按 order 排序层（useMemo 避免每次渲染重新排序）
+  const sortedLayers = useMemo(() => [...layers].sort((a, b) => a.order - b.order), [layers]);
 
   // Epoch 变化时触发积木闪光
   useEffect(() => {

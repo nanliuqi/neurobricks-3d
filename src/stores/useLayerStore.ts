@@ -1,17 +1,16 @@
 import { create } from 'zustand';
-import type { Layer3D, LayerType, LayerParams, LayoutMode, ValidationResult, TensorShape } from '@/types/layer';
+import type { Layer3D, LayerType, LayerParams, LayoutMode, ValidationResult, TensorShape, ShapeValidationError } from '@/types/layer';
 import { BLOCK_STEP, LAYER_META_LIST, DEFAULT_INPUT_SHAPE } from '@/types/layer';
-import { validateNetwork, inferOutputShape, computeParamCount } from '@/utils/shapeInference';
+import { inferOutputShape, computeParamCount, formatShape } from '@/utils/shapeInference';
 import { recalcPositions } from '@/utils/snapAlgorithm';
 
 /**
- * 重新计算每个层的 outputShape、paramCount、validationError
- * 依赖 validateNetwork 的错误信息 + inferOutputShape/computeParamCount
+ * 单次遍历完成：形状推导 + 参数计算 + 校验错误收集（原 3 次遍历合并为 1 次）
  */
-function recomputeLayerStats(layers: Layer3D[], defaultInputShape: TensorShape = DEFAULT_INPUT_SHAPE): Layer3D[] {
+function recomputeLayerStats(layers: Layer3D[], defaultInputShape: TensorShape = DEFAULT_INPUT_SHAPE): { layers: Layer3D[]; validationResult: ValidationResult } {
   const sorted = [...layers].sort((a, b) => a.order - b.order);
 
-  // 确定输入形状：如果第一层是 Input 层且有自定义形状，优先使用
+  // 确定输入形状
   let inputShape: TensorShape | null = defaultInputShape;
   if (sorted.length > 0 && sorted[0].type === 'Input') {
     const p = sorted[0].params;
@@ -21,34 +20,94 @@ function recomputeLayerStats(layers: Layer3D[], defaultInputShape: TensorShape =
   }
 
   let currentShape: TensorShape | null = inputShape;
-  const errorMap = new Map<string, string | null>();
+  const errors: ShapeValidationError[] = [];
+  const warnings: string[] = [];
+  const result: Layer3D[] = [];
 
-  // 先跑 validateNetwork 拿到错误
-  const validationResult = validateNetwork(layers, inputShape);
-  for (const err of validationResult.errors) {
-    if (!errorMap.has(err.layerId)) {
-      errorMap.set(err.layerId, err.message);
+  for (let i = 0; i < sorted.length; i++) {
+    const layer = sorted[i];
+
+    // Linear 前缺 Flatten 检查
+    if (layer.type === 'Linear' && currentShape && currentShape.length > 1) {
+      errors.push({
+        layerId: layer.id,
+        layerType: layer.type,
+        errorType: 'missing_flatten',
+        message: `Linear 层前需要添加 Flatten 层，当前输入形状为 ${formatShape(currentShape)}`,
+        suggestion: '在 Linear 层前添加 Flatten 层',
+        expectedInputShape: null,
+        actualInputShape: currentShape,
+      });
+      result.push({ ...layer, outputShape: null, paramCount: 0, validationError: errors[errors.length - 1].message });
+      currentShape = null;
+      continue;
+    }
+
+    // Conv2D 输入通道交叉校验（防止 Python 端 nn.Conv2d 运行时崩溃）
+    if (layer.type === 'Conv2D' && currentShape && currentShape.length === 3) {
+      const declaredInChannels = layer.params.inChannels;
+      if (declaredInChannels != null && declaredInChannels !== currentShape[0]) {
+        errors.push({
+          layerId: layer.id,
+          layerType: layer.type,
+          errorType: 'param_conflict',
+          message: `Conv2D 输入通道不匹配：inChannels=${declaredInChannels}，但上游输出为 ${formatShape(currentShape)}`,
+          suggestion: `将 inChannels 修改为 ${currentShape[0]}`,
+          expectedInputShape: currentShape,
+          actualInputShape: currentShape,
+        });
+      }
+    }
+
+    // Linear 输入特征交叉校验
+    if (layer.type === 'Linear' && currentShape && currentShape.length === 1) {
+      const declaredInFeatures = layer.params.inFeatures ?? layer.params.inputSize;
+      if (declaredInFeatures != null && declaredInFeatures !== currentShape[0]) {
+        errors.push({
+          layerId: layer.id,
+          layerType: layer.type,
+          errorType: 'param_conflict',
+          message: `Linear 输入特征不匹配：inFeatures=${declaredInFeatures}，但上游输出为 ${formatShape(currentShape)}`,
+          suggestion: `将 inFeatures 修改为 ${currentShape[0]}`,
+          expectedInputShape: currentShape,
+          actualInputShape: currentShape,
+        });
+      }
+    }
+
+    const outputShape = inferOutputShape(layer.type, layer.params, currentShape);
+    const paramCount = computeParamCount(layer.type, layer.params, currentShape);
+
+    // 形状推导失败（非 Input 层）
+    if (outputShape === null && layer.type !== 'Input') {
+      if (!errors.some(e => e.layerId === layer.id)) {
+        errors.push({
+          layerId: layer.id,
+          layerType: layer.type,
+          errorType: 'shape_mismatch',
+          message: `第 ${i + 1} 层 (${layer.type}) 无法推导输出形状，输入形状为 ${formatShape(currentShape)}`,
+          suggestion: '检查前一层的输出形状是否与当前层兼容',
+          expectedInputShape: null,
+          actualInputShape: currentShape,
+        });
+      }
+    }
+
+    const validationError = errors.find(e => e.layerId === layer.id)?.message ?? null;
+
+    result.push({ ...layer, outputShape, paramCount, validationError });
+    currentShape = outputShape;
+
+    // 维度合理性检查
+    if (currentShape && currentShape.some(dim => dim < 1 || dim > 10000)) {
+      warnings.push(`第 ${i + 1} 层 (${layer.type}) 输出形状异常：${formatShape(currentShape)}`);
     }
   }
 
-  // 逐层推导
-  const result: Layer3D[] = [];
-  for (const layer of sorted) {
-    const outputShape = inferOutputShape(layer.type, layer.params, currentShape);
-    const paramCount = computeParamCount(layer.type, layer.params, currentShape);
-    const validationError = errorMap.get(layer.id) ?? null;
-
-    result.push({
-      ...layer,
-      outputShape,
-      paramCount,
-      validationError,
-    });
-
-    currentShape = outputShape;
-  }
-
-  return result;
+  return {
+    layers: result,
+    validationResult: { isValid: errors.length === 0, errors, warnings },
+  };
 }
 
 interface DragPreviewData {
@@ -126,10 +185,9 @@ export const useLayerStore = create<LayerState>()((set, get) => ({
       const newLayers = [...adjustedLayers, newLayer];
       const sortedLayers = [...newLayers].sort((a, b) => a.order - b.order);
       const recalculatedLayers = recalcPositions(sortedLayers);
-      const computedLayers = recomputeLayerStats(recalculatedLayers);
-      const validationResult = validateNetwork(computedLayers);
+      const { layers: computedLayers, validationResult } = recomputeLayerStats(recalculatedLayers);
       const totalParams = computedLayers.reduce((sum, l) => sum + l.paramCount, 0);
-      const hasShapeError = validationResult.errors.length > 0 || computedLayers.some(l => l.validationError !== null);
+      const hasShapeError = validationResult.errors.length > 0;
 
       return { layers: computedLayers, validationResult, totalParams, hasShapeError };
     });
@@ -142,10 +200,9 @@ export const useLayerStore = create<LayerState>()((set, get) => ({
       const sortedLayers = [...filteredLayers].sort((a, b) => a.order - b.order);
       const reindexedLayers = sortedLayers.map((layer, i) => ({ ...layer, order: i }));
       const recalculatedLayers = recalcPositions(reindexedLayers);
-      const computedLayers = recomputeLayerStats(recalculatedLayers);
-      const validationResult = validateNetwork(computedLayers);
+      const { layers: computedLayers, validationResult } = recomputeLayerStats(recalculatedLayers);
       const totalParams = computedLayers.reduce((sum, l) => sum + l.paramCount, 0);
-      const hasShapeError = validationResult.errors.length > 0 || computedLayers.some(l => l.validationError !== null);
+      const hasShapeError = validationResult.errors.length > 0;
 
       return {
         layers: computedLayers,
@@ -178,10 +235,9 @@ export const useLayerStore = create<LayerState>()((set, get) => ({
 
       const sortedLayers = [...adjustedLayers].sort((a, b) => a.order - b.order);
       const recalculatedLayers = recalcPositions(sortedLayers);
-      const computedLayers = recomputeLayerStats(recalculatedLayers);
-      const validationResult = validateNetwork(computedLayers);
+      const { layers: computedLayers, validationResult } = recomputeLayerStats(recalculatedLayers);
       const totalParams = computedLayers.reduce((sum, l) => sum + l.paramCount, 0);
-      const hasShapeError = validationResult.errors.length > 0 || computedLayers.some(l => l.validationError !== null);
+      const hasShapeError = validationResult.errors.length > 0;
 
       return { layers: computedLayers, validationResult, totalParams, hasShapeError };
     });
@@ -197,10 +253,9 @@ export const useLayerStore = create<LayerState>()((set, get) => ({
         return layer;
       });
 
-      const computedLayers = recomputeLayerStats(updatedLayers);
-      const validationResult = validateNetwork(computedLayers);
+      const { layers: computedLayers, validationResult } = recomputeLayerStats(updatedLayers);
       const totalParams = computedLayers.reduce((sum, l) => sum + l.paramCount, 0);
-      const hasShapeError = validationResult.errors.length > 0 || computedLayers.some(l => l.validationError !== null);
+      const hasShapeError = validationResult.errors.length > 0;
 
       return { layers: computedLayers, validationResult, totalParams, hasShapeError };
     });
@@ -221,10 +276,9 @@ export const useLayerStore = create<LayerState>()((set, get) => ({
     const sortedLayers = [...layers].sort((a, b) => a.order - b.order);
     const reindexedLayers = sortedLayers.map((l, i) => ({ ...l, order: i }));
     const recalculatedLayers = recalcPositions(reindexedLayers);
-    const computedLayers = recomputeLayerStats(recalculatedLayers);
-    const validationResult = validateNetwork(computedLayers);
+    const { layers: computedLayers, validationResult } = recomputeLayerStats(recalculatedLayers);
     const totalParams = computedLayers.reduce((sum, l) => sum + l.paramCount, 0);
-    const hasShapeError = validationResult.errors.length > 0 || computedLayers.some(l => l.validationError !== null);
+    const hasShapeError = validationResult.errors.length > 0;
 
     set({ layers: computedLayers, validationResult, totalParams, hasShapeError });
   },
@@ -250,10 +304,9 @@ export const useLayerStore = create<LayerState>()((set, get) => ({
       const allLayers = [...state.layers, ...newLayers];
       const sortedLayers = [...allLayers].sort((a, b) => a.order - b.order);
       const recalculatedLayers = recalcPositions(sortedLayers);
-      const computedLayers = recomputeLayerStats(recalculatedLayers);
-      const validationResult = validateNetwork(computedLayers);
+      const { layers: computedLayers, validationResult } = recomputeLayerStats(recalculatedLayers);
       const totalParams = computedLayers.reduce((sum, l) => sum + l.paramCount, 0);
-      const hasShapeError = validationResult.errors.length > 0 || computedLayers.some(l => l.validationError !== null);
+      const hasShapeError = validationResult.errors.length > 0;
 
       return { layers: computedLayers, validationResult, totalParams, hasShapeError };
     });
@@ -282,10 +335,9 @@ export const useLayerStore = create<LayerState>()((set, get) => ({
       }
 
       const recalculatedLayers = recalcPositions(updatedLayers);
-      const computedLayers = recomputeLayerStats(recalculatedLayers);
-      const validationResult = validateNetwork(computedLayers);
+      const { layers: computedLayers, validationResult } = recomputeLayerStats(recalculatedLayers);
       const totalParams = computedLayers.reduce((sum, l) => sum + l.paramCount, 0);
-      const hasShapeError = validationResult.errors.length > 0 || computedLayers.some(l => l.validationError !== null);
+      const hasShapeError = validationResult.errors.length > 0;
 
       return { layers: computedLayers, layoutMode: mode, validationResult, totalParams, hasShapeError };
     });
@@ -296,10 +348,9 @@ export const useLayerStore = create<LayerState>()((set, get) => ({
     set(state => {
       const sortedLayers = [...state.layers].sort((a, b) => a.order - b.order);
       const recalculatedLayers = recalcPositions(sortedLayers);
-      const computedLayers = recomputeLayerStats(recalculatedLayers);
-      const validationResult = validateNetwork(computedLayers);
+      const { layers: computedLayers, validationResult } = recomputeLayerStats(recalculatedLayers);
       const totalParams = computedLayers.reduce((sum, l) => sum + l.paramCount, 0);
-      const hasShapeError = validationResult.errors.length > 0 || computedLayers.some(l => l.validationError !== null);
+      const hasShapeError = validationResult.errors.length > 0;
 
       return { layers: computedLayers, validationResult, totalParams, hasShapeError };
     });
@@ -308,10 +359,9 @@ export const useLayerStore = create<LayerState>()((set, get) => ({
   // Recompute Layer Stats only
   recomputeLayerStats: () => {
     set(state => {
-      const computedLayers = recomputeLayerStats(state.layers);
-      const validationResult = validateNetwork(computedLayers);
+      const { layers: computedLayers, validationResult } = recomputeLayerStats(state.layers);
       const totalParams = computedLayers.reduce((sum, l) => sum + l.paramCount, 0);
-      const hasShapeError = validationResult.errors.length > 0 || computedLayers.some(l => l.validationError !== null);
+      const hasShapeError = validationResult.errors.length > 0;
 
       return { layers: computedLayers, validationResult, totalParams, hasShapeError };
     });
@@ -330,7 +380,6 @@ export const useLayerStore = create<LayerState>()((set, get) => ({
       selectedId: null,
     });
     get().recalcAll();
-    get().recomputeLayerStats();
   },
 
   // Set Validation Result manually if needed

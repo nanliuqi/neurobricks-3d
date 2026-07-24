@@ -1,4 +1,4 @@
-import { useMemo, useRef, useEffect } from 'react';
+import { memo, useMemo, useRef, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { RoundedBox, Text } from '@react-three/drei';
 import * as THREE from 'three';
@@ -10,7 +10,7 @@ interface Layer3DBlockProps {
   layer: Layer3D;
 }
 
-export default function Layer3DBlock({ layer }: Layer3DBlockProps) {
+const Layer3DBlock = memo(function Layer3DBlock({ layer }: Layer3DBlockProps) {
   const selectedId = useLayerStore(state => state.selectedId);
   const setSelectedId = useLayerStore(state => state.setSelectedId);
   const flashTrigger = useLayerStore(state => state.flashTrigger);
@@ -62,6 +62,17 @@ export default function Layer3DBlock({ layer }: Layer3DBlockProps) {
   // 选中脉冲动画 + 闪光衰减（只操作 ref，不用 setState）
   useFrame((state, delta) => {
     if (!meshRef.current) return;
+
+    // 没有选中且没有闪光时，确保 material 状态正确后跳过
+    if (!isSelected && flashIntensity.current <= 0) {
+      const material = meshRef.current.material as THREE.MeshStandardMaterial;
+      if (material.emissiveIntensity !== 0) {
+        material.emissive.set('#000000');
+        material.emissiveIntensity = 0;
+      }
+      return;
+    }
+
     const material = meshRef.current.material as THREE.MeshStandardMaterial;
 
     // 闪光衰减（0.5秒内衰减完）
@@ -73,9 +84,6 @@ export default function Layer3DBlock({ layer }: Layer3DBlockProps) {
       // 选中脉冲
       material.emissive.set('#4488ff');
       material.emissiveIntensity = 0.4 + Math.sin(state.clock.elapsedTime * 3) * 0.2;
-    } else {
-      material.emissive.set('#000000');
-      material.emissiveIntensity = 0;
     }
   });
 
@@ -198,4 +206,6 @@ export default function Layer3DBlock({ layer }: Layer3DBlockProps) {
       )}
     </group>
   );
-}
+});
+
+export default Layer3DBlock;

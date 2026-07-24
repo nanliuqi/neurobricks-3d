@@ -225,8 +225,16 @@ def get_dataset(dataset_name, batch_size, data_dir, config=None):
         log_message("error", message=f"Failed to load dataset '{dataset_name}': {str(e)}")
         return None, None
     
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    # GPU 时启用 pin_memory 加速数据传输，num_workers 并行加载
+    pin_memory = torch.cuda.is_available()
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset, batch_size=batch_size, shuffle=True,
+        num_workers=2, pin_memory=pin_memory, drop_last=False
+    )
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset, batch_size=batch_size, shuffle=False,
+        num_workers=2, pin_memory=pin_memory, drop_last=False
+    )
     return train_loader, test_loader
 
 def listen_commands(controller):
@@ -369,7 +377,7 @@ def train(model_and_shape, config):
             if controller.should_stop:
                 break
             
-            data, target = data.to(device), target.to(device)
+            data, target = data.to(device, non_blocking=True), target.to(device, non_blocking=True)
             optimizer.zero_grad()
             output = model(data)
             loss = criterion(output, target)
@@ -397,7 +405,7 @@ def train(model_and_shape, config):
         val_loss = 0.0
         with torch.no_grad():
             for data, target in test_loader:
-                data, target = data.to(device), target.to(device)
+                data, target = data.to(device, non_blocking=True), target.to(device, non_blocking=True)
                 output = model(data)
                 val_loss += criterion(output, target).item()
                 _, predicted = output.max(1)

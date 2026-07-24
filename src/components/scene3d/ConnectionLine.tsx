@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react';
+import { memo, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { BLOCK_HEIGHT } from '@/types/layer'; 
@@ -10,7 +10,7 @@ interface ConnectionLineProps {
   isTraining?: boolean;
 }
 
-export default function ConnectionLine({ from, to, hasError = false, isTraining = false }: ConnectionLineProps) {
+const ConnectionLine = memo(function ConnectionLine({ from, to, hasError = false, isTraining = false }: ConnectionLineProps) {
   const dotRef = useRef<THREE.Mesh>(null);
 
   // 计算曲线几何体
@@ -74,4 +74,6 @@ export default function ConnectionLine({ from, to, hasError = false, isTraining 
       )}
     </group>
   );
-}
+});
+
+export default ConnectionLine;

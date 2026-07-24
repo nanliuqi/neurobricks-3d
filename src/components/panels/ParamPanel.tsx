@@ -19,7 +19,8 @@ const PARAM_LABELS: Record<string, string> = {
 
 export default function ParamPanel() {
   const selectedId = useLayerStore(state => state.selectedId);
-  const layers = useLayerStore(state => state.layers);
+  const layer = useLayerStore(state => state.layers.find(l => l.id === state.selectedId));
+  const layerCount = useLayerStore(state => state.layers.length);
   const updateLayerParam = useLayerStore(state => state.updateLayerParam);
   const removeLayer = useLayerStore(state => state.removeLayer);
   const setSelectedId = useLayerStore(state => state.setSelectedId);
@@ -29,19 +30,10 @@ export default function ParamPanel() {
   const [savedField, setSavedField] = useState<string | null>(null);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  if (!selectedId) {
+  if (!selectedId || !layer) {
     return (
       <div style={{ padding: '16px', color: '#94a3b8', textAlign: 'center' }}>
-        请选择一个层
-      </div>
-    );
-  }
-
-  const layer = layers.find(l => l.id === selectedId);
-  if (!layer) {
-    return (
-      <div style={{ padding: '16px', color: '#ef4444', textAlign: 'center' }}>
-        层不存在
+        {!selectedId ? '请选择一个层' : '层不存在'}
       </div>
     );
   }
@@ -324,7 +316,7 @@ export default function ParamPanel() {
       {/* 层级信息 */}
       <div style={{ marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ color: '#94a3b8', fontSize: '12px' }}>
-          第 <span style={{ color: 'white', fontWeight: 600 }}>{layer.order + 1}</span> 层 / 共 {layers.length} 层
+          第 <span style={{ color: 'white', fontWeight: 600 }}>{layer.order + 1}</span> 层 / 共 {layerCount} 层
         </span>
         <span style={{
           padding: '2px 8px',
@@ -363,15 +355,15 @@ export default function ParamPanel() {
         </button>
         <button
           onClick={() => moveLayer(selectedId, layer.order + 1)}
-          disabled={layer.order === layers.length - 1}
+          disabled={layer.order === layerCount - 1}
           style={{
             flex: 1,
             padding: '8px',
-            backgroundColor: layer.order === layers.length - 1 ? '#475569' : '#7c3aed',
+            backgroundColor: layer.order === layerCount - 1 ? '#475569' : '#7c3aed',
             color: 'white',
             border: 'none',
             borderRadius: '4px',
-            cursor: layer.order === layers.length - 1 ? 'not-allowed' : 'pointer',
+            cursor: layer.order === layerCount - 1 ? 'not-allowed' : 'pointer',
             fontSize: '12px',
             fontWeight: 600,
           }}
@@ -384,7 +376,8 @@ export default function ParamPanel() {
       <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
         <button
           onClick={() => {
-            const above = layers.find(l => l.order === layer.order - 1);
+            const allLayers = useLayerStore.getState().layers;
+            const above = allLayers.find(l => l.order === layer.order - 1);
             if (above) setSelectedId(above.id);
           }}
           disabled={layer.order === 0}
@@ -404,18 +397,19 @@ export default function ParamPanel() {
         </button>
         <button
           onClick={() => {
-            const below = layers.find(l => l.order === layer.order + 1);
+            const allLayers = useLayerStore.getState().layers;
+            const below = allLayers.find(l => l.order === layer.order + 1);
             if (below) setSelectedId(below.id);
           }}
-          disabled={layer.order === layers.length - 1}
+          disabled={layer.order === layerCount - 1}
           style={{
             flex: 1,
             padding: '8px',
-            backgroundColor: layer.order === layers.length - 1 ? '#475569' : '#1e40af',
+            backgroundColor: layer.order === layerCount - 1 ? '#475569' : '#1e40af',
             color: 'white',
             border: 'none',
             borderRadius: '4px',
-            cursor: layer.order === layers.length - 1 ? 'not-allowed' : 'pointer',
+            cursor: layer.order === layerCount - 1 ? 'not-allowed' : 'pointer',
             fontSize: '12px',
             fontWeight: 600,
           }}
