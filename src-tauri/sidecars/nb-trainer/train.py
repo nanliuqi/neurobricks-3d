@@ -113,35 +113,114 @@ def builtin_dataset(dataset_name, data_dir):
         # 内置化失败不影响训练，只是下次还得从缓存读
         log_message("log", level="warning", message=f"Failed to builtin dataset: {e}")
 
-def get_dataset(dataset_name, batch_size, data_dir):
+def get_dataset(dataset_name, batch_size, data_dir, config=None):
     """加载数据集，data_dir 为数据目录"""
-    os.makedirs(data_dir, exist_ok=True)
-    
     log_message("log", level="info", message=f"Loading dataset '{dataset_name}'...")
     
     try:
         if dataset_name == 'mnist':
+            os.makedirs(data_dir, exist_ok=True)
             transform = transforms.Compose([
                 transforms.ToTensor(),
                 transforms.Normalize((0.1307,), (0.3081,))
             ])
             train_dataset = datasets.MNIST(data_dir, train=True, download=True, transform=transform)
             test_dataset = datasets.MNIST(data_dir, train=False, transform=transform)
+            # 下载成功后自动内置化（复制到 sidecar/data/）
+            builtin_dataset(dataset_name, data_dir)
         elif dataset_name == 'cifar10':
+            os.makedirs(data_dir, exist_ok=True)
             transform = transforms.Compose([
                 transforms.ToTensor(),
                 transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2616))
             ])
             train_dataset = datasets.CIFAR10(data_dir, train=True, download=True, transform=transform)
             test_dataset = datasets.CIFAR10(data_dir, train=False, transform=transform)
+            builtin_dataset(dataset_name, data_dir)
+        elif dataset_name == 'local_image':
+            # 自定义图像文件夹（ImageFolder 格式：子文件夹名=类别名）
+            data_path = config.get('dataPath', '') if config else ''
+            if not data_path or not os.path.isdir(data_path):
+                log_message("error", message=f"本地图像目录不存在: {data_path}")
+                return None, None
+            
+            # 从 config 获取目标尺寸（从 Input 层推导）
+            input_shape = config.get('inputShape', None) if config else None
+            if input_shape and len(input_shape) >= 3:
+                target_channels = input_shape[0]
+                target_h = input_shape[1]
+                target_w = input_shape[2]
+            else:
+                target_channels = 3
+                target_h = 224
+                target_w = 224
+            
+            # 构建 transform
+            if target_channels == 1:
+                transform = transforms.Compose([
+                    transforms.Resize((target_h, target_w)),
+                    transforms.Grayscale(num_output_channels=1),
+                    transforms.ToTensor(),
+                    transforms.Normalize((0.5,), (0.5,))
+                ])
+            else:
+                transform = transforms.Compose([
+                    transforms.Resize((target_h, target_w)),
+                    transforms.ToTensor(),
+                    transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+                ])
+            
+            # 使用 ImageFolder 加载
+            full_dataset = datasets.ImageFolder(data_path, transform=transform)
+            
+            # 按 train_ratio 划分训练/验证集
+            train_ratio = config.get('trainRatio', 0.8) if config else 0.8
+            train_size = int(train_ratio * len(full_dataset))
+            test_size = len(full_dataset) - train_size
+            train_dataset, test_dataset = torch.utils.data.random_split(
+                full_dataset, [train_size, test_size]
+            )
+            
+            log_message("log", level="info", 
+                message=f"Local image dataset loaded: {len(full_dataset)} samples, {len(full_dataset.classes)} classes")
+        
+        elif dataset_name == 'csv':
+            # CSV 文件（最后一列为标签，其余为特征）
+            import pandas as pd
+            data_path = config.get('dataPath', '') if config else ''
+            if not data_path or not os.path.isfile(data_path):
+                log_message("error", message=f"CSV 文件不存在: {data_path}")
+                return None, None
+            
+            df = pd.read_csv(data_path)
+            features = df.iloc[:, :-1].values.astype('float32')
+            labels = df.iloc[:, -1].values.astype('int64')
+            
+            # 归一化特征
+            from sklearn.preprocessing import StandardScaler
+            scaler = StandardScaler()
+            features = scaler.fit_transform(features)
+            
+            # 构建 TensorDataset
+            tensor_features = torch.FloatTensor(features)
+            tensor_labels = torch.LongTensor(labels)
+            full_dataset = torch.utils.data.TensorDataset(tensor_features, tensor_labels)
+            
+            train_ratio = config.get('trainRatio', 0.8) if config else 0.8
+            train_size = int(train_ratio * len(full_dataset))
+            test_size = len(full_dataset) - train_size
+            train_dataset, test_dataset = torch.utils.data.random_split(
+                full_dataset, [train_size, test_size]
+            )
+            
+            log_message("log", level="info", 
+                message=f"CSV dataset loaded: {len(full_dataset)} samples, {features.shape[1]} features")
+        
         else:
             log_message("error", message=f"Unsupported dataset: {dataset_name}")
             return None, None
         
         log_message("log", level="info", message=f"Dataset '{dataset_name}' loaded successfully")
-        
-        # 下载成功后自动内置化（复制到 sidecar/data/）
-        builtin_dataset(dataset_name, data_dir)
     except Exception as e:
         log_message("error", message=f"Failed to load dataset '{dataset_name}': {str(e)}")
         return None, None
@@ -226,10 +305,17 @@ def train(model_and_shape, config):
     else:
         log_message("log", level="warning", message="No Input layer shape specified, skipping validation")
     
-    # 解析数据目录（优先内置，其次缓存）
-    data_dir = resolve_data_dir(dataset_name)
+    # 将 input_shape 注入 config，供 get_dataset 使用
+    if input_shape:
+        config['inputShape'] = list(input_shape)
     
-    train_loader, test_loader = get_dataset(dataset_name, batch_size, data_dir)
+    # 内置数据集用 resolve_data_dir，自定义数据集从 config 读路径
+    if dataset_name in ('mnist', 'cifar10'):
+        data_dir = resolve_data_dir(dataset_name)
+    else:
+        data_dir = config.get('dataPath', '.') or '.'
+    
+    train_loader, test_loader = get_dataset(dataset_name, batch_size, data_dir, config)
     if train_loader is None:
         return
     
@@ -321,14 +407,14 @@ def train(model_and_shape, config):
         val_accuracy = val_correct / max(val_total, 1)
         log_message("epoch_end",
             epoch=epoch,
-            train_loss=round(running_loss / max(len(train_loader), 1), 4),
-            val_accuracy=round(val_accuracy, 4)
+            trainLoss=round(running_loss / max(len(train_loader), 1), 4),
+            valAccuracy=round(val_accuracy, 4)
         )
     
     # 训练完成
     if not controller.should_stop:
         final_accuracy = val_correct / max(val_total, 1)
-        log_message("done", final_accuracy=round(final_accuracy, 4))
+        log_message("done", finalAccuracy=round(final_accuracy, 4))
         
         # 保存模型：优先用户目录（打包后 sidecar 目录可能只读）
         user_weights_dir = os.path.join(os.path.expanduser('~'), '.neurobricks')

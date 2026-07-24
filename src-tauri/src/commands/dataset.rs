@@ -92,16 +92,25 @@ pub fn import_local_images(dir_path: String) -> Result<DatasetInfo, String> {
         }
     }
     
-    // 尝试读取第一张图片获取尺寸
+    // 尝试读取第一张图片获取尺寸与真实通道数
     let (width, height, channels) = if let Some(img_path) = first_image_path {
         match image::image_dimensions(&img_path) {
             Ok((w, h)) => {
-                // 检测通道数（简化：根据扩展名判断）
-                let ext = img_path.extension()
-                    .and_then(|e| e.to_str())
-                    .unwrap_or("")
-                    .to_lowercase();
-                let ch = if ext == "png" { 4 } else { 3 };
+                // 解码首图获取真实颜色类型（按扩展名猜测不可靠：PNG 可能是灰度或 RGBA）。
+                // 统一映射为训练端支持的两种通道模式：
+                // 灰度（含带 alpha 的灰度）→ 1；彩色（RGB/RGBA 等）→ 3
+                // （torchvision ImageFolder 默认将彩色图转为 RGB，即 3 通道）
+                let ch = match image::open(&img_path) {
+                    Ok(img) => match img.color() {
+                        image::ColorType::L8
+                        | image::ColorType::L16
+                        | image::ColorType::La8
+                        | image::ColorType::La16 => 1u32,
+                        _ => 3u32,
+                    },
+                    // 解码失败时按彩色 3 通道兜底（训练端 ToTensor 默认输出 3 通道）
+                    Err(_) => 3u32,
+                };
                 (Some(w), Some(h), Some(ch))
             },
             Err(_) => (None, None, None),

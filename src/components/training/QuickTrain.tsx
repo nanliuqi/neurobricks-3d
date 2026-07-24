@@ -96,6 +96,8 @@ export default function QuickTrain() {
   const isTraining = useTrainingStore(state => state.isTraining);
   const startTraining = useTrainingStore(state => state.startTraining);
   const datasetInfo = useDatasetStore(state => state.datasetInfo);
+  const datasetPath = useDatasetStore(state => state.datasetPath);
+  const trainRatio = useDatasetStore(state => state.trainRatio);
 
   // 训练配置状态（从 localStorage 恢复）
   const saved = loadSavedConfig();
@@ -129,6 +131,36 @@ export default function QuickTrain() {
       return;
     }
 
+    // 网络结构存在形状错误时拦截：Python 端 validate_model 对此类配置必然失败，
+    // 直接报错比启动一个注定失败的训练进程更清晰
+    if (useLayerStore.getState().hasShapeError) {
+      setHint('❌ 网络结构存在形状错误，请查看错误面板修复后再训练');
+      setTimeout(() => setHint(null), 5000);
+      return;
+    }
+
+    // CSV 是一维表格数据：卷积/池化层需要二维图像输入，
+    // 且 validate_model 的三维虚拟输入会通过校验、第一个真实批次才崩溃，错误晦涩，故提前拦截
+    if (
+      datasetInfo.type === 'csv' &&
+      layers.some(l => l.type === 'Conv2D' || l.type === 'MaxPool2D' || l.type === 'AvgPool2D')
+    ) {
+      setHint('❌ CSV 是表格数据，不支持卷积/池化层，请改用全连接结构');
+      setTimeout(() => setHint(null), 5000);
+      return;
+    }
+
+    // 从 Input 层派生输入形状：Python 端 local_image 数据集据此 Resize / 灰度化，
+    // 保证数据与模型输入一致（否则回退 3×224×224，与非 224 输入的网络必然不匹配）
+    const inputLayer = layers.find(l => l.type === 'Input');
+    const inputShape =
+      inputLayer &&
+      inputLayer.params.inChannels != null &&
+      inputLayer.params.inputHeight != null &&
+      inputLayer.params.inputWidth != null
+        ? [inputLayer.params.inChannels, inputLayer.params.inputHeight, inputLayer.params.inputWidth]
+        : undefined;
+
     // 构建训练配置
     const config: TrainConfig = {
       epochs,
@@ -142,6 +174,9 @@ export default function QuickTrain() {
       })),
       optimizer,
       weightDecay,
+      dataPath: datasetPath || undefined,
+      trainRatio,
+      inputShape,
     };
 
     try {

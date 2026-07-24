@@ -35,7 +35,9 @@ export const CLASSIC_MODELS: ClassicModel[] = [
     paper: 'Gradient-Based Learning Applied to Document Recognition',
     compatibleDatasets: ['mnist', 'cifar10'],
     layers: [
-      { type: 'Input', params: { inChannels: 1, inputHeight: 32, inputWidth: 32 } },
+      // 模板以 MNIST（1×28×28）为默认输入，此时 Flatten 输出恰为 256，与下方 Linear 一致；
+      // 选择 CIFAR-10 等其他数据集时由 adaptLayersToInputShape 自动修正全部依赖参数
+      { type: 'Input', params: { inChannels: 1, inputHeight: 28, inputWidth: 28 } },
       { type: 'Conv2D', params: { inChannels: 1, outChannels: 6, kernelSize: 5, padding: 0 } },
       { type: 'AvgPool2D', params: { poolKernelSize: 2, poolStride: 2 } },
       { type: 'Conv2D', params: { inChannels: 6, outChannels: 16, kernelSize: 5, padding: 0 } },

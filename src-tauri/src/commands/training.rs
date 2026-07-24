@@ -26,6 +26,14 @@ pub struct TrainConfig {
     pub optimizer: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub weight_decay: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub train_ratio: Option<f64>,
+    /// Input 层形状 [C, H, W]：Python 端 local_image 数据集据此 Resize / 灰度化，
+    /// 使数据与模型输入一致（缺失时 Python 回退 3×224×224）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_shape: Option<Vec<u32>>,
 }
 
 /// 训练状态管理
@@ -308,4 +316,120 @@ pub fn step_training(state: tauri::State<'_, Arc<Mutex<TrainingState>>>) -> Resu
 #[tauri::command]
 pub fn run_gradient_diagnosis() -> Result<String, String> {
     Err("梯度诊断功能尚未实现，将在后续版本中支持".to_string())
+}
+
+/// 在多个已知位置搜索模型权重文件（同 export.rs 逻辑）
+fn resolve_model_path(model_path: &str) -> Result<String, String> {
+    // 如果前端传了具体路径且存在，直接用
+    let direct = std::path::PathBuf::from(model_path);
+    if direct.exists() {
+        return Ok(direct.to_string_lossy().to_string());
+    }
+
+    // 展开 ~ 为用户目录
+    let expanded = if model_path.starts_with("~/") || model_path.starts_with("~\\") {
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_default();
+        format!("{}{}", home, &model_path[1..])
+    } else {
+        model_path.to_string()
+    };
+    let expanded_pb = std::path::PathBuf::from(&expanded);
+    if expanded_pb.exists() {
+        return Ok(expanded_pb.to_string_lossy().to_string());
+    }
+
+    // 多路径搜索（同 export_model_weights）
+    let home_dir = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_default();
+    let candidates = [
+        std::path::PathBuf::from(&home_dir).join(".neurobricks").join("model_weights.pth"),
+        std::path::PathBuf::from("src-tauri/sidecars/nb-trainer/model_weights.pth"),
+        std::path::PathBuf::from("sidecars/nb-trainer/model_weights.pth"),
+        std::path::PathBuf::from("model_weights.pth"),
+    ];
+    for c in &candidates {
+        if c.exists() {
+            return Ok(c.to_string_lossy().to_string());
+        }
+    }
+
+    Err("未找到模型权重文件，请先完成一次训练".to_string())
+}
+
+#[tauri::command]
+pub fn predict_image(
+    app: AppHandle,
+    model_path: String,
+    image_path: String,
+    layers: serde_json::Value,
+    input_shape: Vec<u32>,
+) -> Result<String, String> {
+    // 解析模型权重路径（多位置搜索）
+    let resolved_model = resolve_model_path(&model_path)?;
+
+    // 构建 config JSON
+    let config = serde_json::json!({
+        "modelPath": resolved_model,
+        "imagePath": image_path,
+        "layers": layers,
+        "inputShape": input_shape,
+    });
+    let config_str = serde_json::to_string(&config).map_err(|e| e.to_string())?;
+
+    // 查找 sidecar 目录
+    let sidecar_path = app
+        .path_resolver()
+        .resolve_resource("sidecars/nb-trainer")
+        .or_else(|| {
+            std::env::current_exe().ok().and_then(|exe| {
+                exe.parent().map(|p| {
+                    let mut path = p.to_path_buf();
+                    if path.ends_with("debug") || path.ends_with("release") {
+                        path.pop();
+                        path.pop();
+                    }
+                    path.join("sidecars").join("nb-trainer")
+                })
+            })
+        })
+        .ok_or("找不到 sidecar 目录")?;
+
+    // 查找 Python
+    let python_path = std::env::var("PYTHON").unwrap_or_else(|_| "python".to_string());
+    let script_path = sidecar_path.join("predict.py");
+
+    if !script_path.exists() {
+        return Err(format!("predict.py 不存在: {:?}", script_path));
+    }
+
+    // 执行 Python 脚本
+    let output = Command::new(&python_path)
+        .arg(&script_path)
+        .arg(&config_str)
+        .current_dir(&sidecar_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| format!("启动推理进程失败: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    if !stderr.is_empty() {
+        eprintln!("[Predict stderr] {}", stderr);
+    }
+
+    let trimmed = stdout.trim();
+    if trimmed.is_empty() {
+        return Err(format!("推理无输出。stderr: {}", stderr));
+    }
+
+    // 验证 stdout 是合法 JSON（修正：不能用 parse::<String>，那要求 JSON 引号字符串）
+    serde_json::from_str::<serde_json::Value>(trimmed)
+        .map_err(|e| format!("解析推理结果失败: {} | stdout: {}", e, trimmed))?;
+
+    Ok(trimmed.to_string())
 }

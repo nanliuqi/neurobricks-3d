@@ -31,6 +31,12 @@ export interface TrainConfig {
   optimizer?: OptimizerType;
   /** 权重衰减（L2 正则化） */
   weightDecay?: number;
+  /** 自定义数据集路径（local_image/csv 时使用） */
+  dataPath?: string;
+  /** 训练集比例（0.5~0.9） */
+  trainRatio?: number;
+  /** Input 层形状 [C, H, W]：Python 端 local_image 数据集据此 Resize / 灰度化，使数据与模型输入一致 */
+  inputShape?: number[];
 }
 
 /**

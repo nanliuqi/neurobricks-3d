@@ -102,12 +102,15 @@ export default function App() {
             store.updateProgress({
               epoch: data.epoch ?? 0,
               step: 0,
-              loss: data.trainLoss ?? 0,
-              accuracy: data.valAccuracy ?? 0,
+              loss: data.trainLoss ?? data.train_loss ?? 0,
+              accuracy: data.valAccuracy ?? data.val_accuracy ?? 0,
               timestamp: Date.now(),
             });
           } else if (data.type === 'done') {
-            store.finishTraining(data.finalAccuracy ?? 0);
+            // 仅在训练进行中时处理，避免与 training-done 事件重复调用
+            if (store.isTraining) {
+              store.finishTraining(data.finalAccuracy ?? data.final_accuracy ?? 0);
+            }
           } else if (data.type === 'log') {
             const level = data.level === 'warning' ? 'warn' : data.level || 'info';
             store.addLog(level, data.message ?? '');
@@ -116,6 +119,7 @@ export default function App() {
 
         unlisteners.push(await listen('training-done', () => {
           const store = useTrainingStore.getState();
+          // 仅在训练进行中时处理（“done”消息已处理过时不再重复调用）
           if (store.isTraining) {
             store.finishTraining(store.currentAccuracy ?? 0);
           }

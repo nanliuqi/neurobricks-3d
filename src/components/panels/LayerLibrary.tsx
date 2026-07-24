@@ -5,6 +5,7 @@ import { LAYER_META_LIST, type LayerMeta, type LayerType } from '@/types/layer';
 import { CLASSIC_MODELS } from '@/types/classicModels';
 import { useLayerStore } from '@/stores/useLayerStore';
 import { useDatasetStore } from '@/stores/useDatasetStore';
+import { adaptLayersToInputShape } from '@/utils/shapeInference';
 import { BLOCK_STEP, BLOCK_HEIGHT } from '@/types/layer';
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -123,23 +124,27 @@ export default function LayerLibrary() {
                     <div
                       key={model.id}
                       onClick={() => {
-                        // 根据当前数据集适配 Input 层
+                        // 根据当前数据集适配整个模型：
+                        // Input 层形状 + 下游 Conv2D.inChannels / Linear.inFeatures 自动修正
                         let layersToAdd = model.layers;
-                        if (datasetInfo) {
-                          layersToAdd = model.layers.map(layer => {
-                            if (layer.type === 'Input') {
-                              return {
-                                ...layer,
-                                params: {
-                                  ...layer.params,
-                                  inChannels: datasetInfo.channels,
-                                  inputHeight: datasetInfo.imageHeight,
-                                  inputWidth: datasetInfo.imageWidth,
-                                },
-                              };
-                            }
-                            return layer;
-                          });
+                        if (datasetInfo?.type === 'csv') {
+                          // CSV 是表格数据：以 1×1×特征数 编码适配（Flatten 输出 = 特征数）；
+                          // 卷积模型无法完整适配（形状链在卷积层断开），由校验错误面板引导用户
+                          const featureCount = (datasetInfo.columns?.length ?? 0) - 1;
+                          if (featureCount > 0) {
+                            layersToAdd = adaptLayersToInputShape(model.layers, [1, 1, featureCount]);
+                          }
+                        } else if (
+                          datasetInfo &&
+                          datasetInfo.channels != null &&
+                          datasetInfo.imageHeight != null &&
+                          datasetInfo.imageWidth != null
+                        ) {
+                          layersToAdd = adaptLayersToInputShape(model.layers, [
+                            datasetInfo.channels,
+                            datasetInfo.imageHeight,
+                            datasetInfo.imageWidth,
+                          ]);
                         }
                         addClassicModel(layersToAdd);
                       }}
@@ -192,7 +197,7 @@ export default function LayerLibrary() {
                     );
                   })}
                   <div style={{ fontSize: '10px', color: '#64748b', padding: '4px 4px 0 4px', lineHeight: '1.5' }}>
-                    💡 添加模型时 Input 层会自动适配当前数据集。其他层如形状不匹配，请手动调整参数。
+                    💡 添加模型时会自动适配当前数据集（Input 形状、卷积通道数、全连接特征数）。
                   </div>
                 </div>
               )}

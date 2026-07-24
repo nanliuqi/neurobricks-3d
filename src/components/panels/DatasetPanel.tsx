@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useDatasetStore } from '@/stores/useDatasetStore';
 import { useLayerStore } from '@/stores/useLayerStore';
+import { adaptLayersToInputShape } from '@/utils/shapeInference';
 import type { DatasetInfo, DatasetType } from '@/types/dataset';
 
 const BUILTIN_DATASETS = [
@@ -8,18 +9,59 @@ const BUILTIN_DATASETS = [
   { value: 'cifar10', label: 'CIFAR-10' },
 ];
 
+/**
+ * 尝试将场景中的网络层自动适配到目标输入形状（内置 / 自定义图像 / CSV 数据集共用）。
+ * 通过预适配差异比对检测是否需要修正（含 Input 形状、Conv2D.inChannels、Linear.inFeatures），
+ * 需要时弹窗征求用户确认后应用（保留 order/position，不重排积木）。
+ * @param datasetName 数据集显示名（用于提示文案）
+ * @param target 目标输入形状 [C, H, W]
+ * @param targetLabel 目标形状的展示文案（CSV 为编码形状，需附加说明）
+ */
+function tryAdaptNetwork(datasetName: string, target: [number, number, number], targetLabel: string) {
+  const layers = useLayerStore.getState().layers;
+  const inputLayer = layers.find(l => l.type === 'Input');
+  if (!inputLayer) return;
+
+  const adapted = adaptLayersToInputShape(layers, target);
+  const needsUpdate = adapted.some(
+    (l, i) => JSON.stringify(l.params) !== JSON.stringify(layers[i].params)
+  );
+  if (!needsUpdate) return;
+
+  const p = inputLayer.params;
+  const confirmed = window.confirm(
+    `检测到网络层参数（Input: ${p.inChannels ?? '?'}×${p.inputHeight ?? '?'}×${p.inputWidth ?? '?'}）与数据集 ${datasetName}（目标输入: ${targetLabel}）不匹配，是否自动适配？\n将自动修正 Input 层及下游卷积通道数 / 全连接特征数。`
+  );
+  if (confirmed) {
+    // adapted 由 layers 深拷贝而来，order/position 均保留；
+    // 随后重新计算形状统计与校验结果（与 updateLayerParam 同构，不重排位置）
+    useLayerStore.setState({ layers: adapted });
+    useLayerStore.getState().recomputeLayerStats();
+  }
+}
+
 export default function DatasetPanel() {
   const datasetInfo = useDatasetStore(state => state.datasetInfo);
   const setDataset = useDatasetStore(state => state.setDataset);
   const trainRatio = useDatasetStore(state => state.trainRatio);
   const setTrainRatio = useDatasetStore(state => state.setTrainRatio);
 
-  const [selectedBuiltin, setSelectedBuiltin] = useState<string>('');
+  const [selectedBuiltin, setSelectedBuiltin] = useState<string>(() => {
+    // 从持久化 store 同步初始值，避免重启后下拉框显示“请选择”但数据集已恢复的不一致
+    const info = useDatasetStore.getState().datasetInfo;
+    return info && (info.type === 'mnist' || info.type === 'cifar10') ? info.type : '';
+  });
   const [loading, setLoading] = useState(false);
 
   // 选择内置数据集
   const handleBuiltinSelect = (datasetName: string) => {
     setSelectedBuiltin(datasetName);
+
+    // 选择“请选择...”占位项时清除数据集，避免创建 type='' 的无效配置
+    if (!datasetName) {
+      useDatasetStore.getState().clearDataset();
+      return;
+    }
 
     const info = {
       name: datasetName.toUpperCase(),
@@ -32,28 +74,12 @@ export default function DatasetPanel() {
     };
     setDataset(info);
 
-    // 检查是否需要适配 Input 层
-    const layers = useLayerStore.getState().layers;
-    const inputLayer = layers.find(l => l.type === 'Input');
-    if (inputLayer) {
-      const p = inputLayer.params;
-      const needsUpdate =
-        p.inChannels !== info.channels ||
-        p.inputHeight !== info.imageHeight ||
-        p.inputWidth !== info.imageWidth;
-
-      if (needsUpdate) {
-        const confirmed = window.confirm(
-          `检测到 Input 层参数 (${p.inChannels}×${p.inputHeight}×${p.inputWidth}) 与数据集 ${info.name} (${info.channels}×${info.imageHeight}×${info.imageWidth}) 不匹配，是否自动适配？`
-        );
-        if (confirmed) {
-          const store = useLayerStore.getState();
-          store.updateLayerParam(inputLayer.id, 'inChannels', info.channels);
-          store.updateLayerParam(inputLayer.id, 'inputHeight', info.imageHeight);
-          store.updateLayerParam(inputLayer.id, 'inputWidth', info.imageWidth);
-        }
-      }
-    }
+    // 检查是否需要适配网络层（含下游 Conv2D.inChannels / Linear.inFeatures）
+    tryAdaptNetwork(
+      info.name,
+      [info.channels, info.imageHeight, info.imageWidth],
+      `${info.channels}×${info.imageHeight}×${info.imageWidth}`
+    );
   };
 
   // 选择本地图像文件夹
@@ -72,7 +98,17 @@ export default function DatasetPanel() {
       if (!dirPath) return;
 
       const result = await invoke<DatasetInfo>('import_local_images', { dirPath });
-      setDataset(result);
+      setDataset(result, dirPath as string);
+
+      // 自定义图像数据集：Rust 端已返回首图尺寸与真实通道数（灰度→1，彩色→3），
+      // 据此适配网络（与内置数据集同构）；训练时 Python 端会将图像 Resize 到 Input 形状
+      if (result.channels != null && result.imageHeight != null && result.imageWidth != null) {
+        tryAdaptNetwork(
+          result.name,
+          [result.channels, result.imageHeight, result.imageWidth],
+          `${result.channels}×${result.imageHeight}×${result.imageWidth}`
+        );
+      }
     } catch (error) {
       console.error('Failed to import images:', error);
     } finally {
@@ -96,7 +132,27 @@ export default function DatasetPanel() {
       if (!filePath) return;
 
       const result = await invoke<DatasetInfo>('import_csv', { filePath });
-      setDataset(result);
+      setDataset(result, filePath as string);
+
+      // CSV 是一维表格数据（前 N-1 列为特征、末列为标签），与二维卷积网络不兼容：
+      // 卷积/池化层需要二维图像输入，强行训练会在第一个真实批次崩溃，故直接提示
+      const layers = useLayerStore.getState().layers;
+      const hasConvLayers = layers.some(
+        l => l.type === 'Conv2D' || l.type === 'MaxPool2D' || l.type === 'AvgPool2D'
+      );
+      if (hasConvLayers) {
+        window.alert(
+          '⚠️ CSV 是表格数据，不支持卷积/池化层。\n当前网络包含卷积层，无法自动适配，请改用全连接结构（Input → Flatten → Linear）。'
+        );
+        return;
+      }
+
+      // 纯全连接网络：将 Input 适配为 1×1×特征数 的编码形状（Flatten 后恰为特征数），
+      // 并修正首个 Linear 的 inFeatures，使网络与 CSV 特征维度一致
+      const featureCount = (result.columns?.length ?? 0) - 1;
+      if (featureCount > 0) {
+        tryAdaptNetwork(result.name, [1, 1, featureCount], `1×1×${featureCount}（表格特征编码）`);
+      }
     } catch (error) {
       console.error('Failed to import CSV:', error);
     } finally {

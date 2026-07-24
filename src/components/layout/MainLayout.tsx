@@ -8,6 +8,7 @@ import ExportPanel from '../panels/ExportPanel';
 import GPUPanel from '../panels/GPUPanel';
 import CloudPanel from '../panels/CloudPanel';
 import HelpPanel from '../panels/HelpPanel';
+import PredictPanel from '../panels/PredictPanel';
 import TrainMonitor from '../training/TrainMonitor';
 import SceneStats from '../scene3d/SceneStats';
 import SceneControls from '../scene3d/SceneControls';
@@ -20,7 +21,7 @@ import { useState, useEffect } from 'react';
 export default function MainLayout() {
   const selectedId = useLayerStore(state => state.selectedId);
   const isTraining = useTrainingStore(state => state.isTraining);
-  const [rightTab, setRightTab] = useState<'param' | 'dataset' | 'export' | 'gpu' | 'cloud' | 'trainMonitor' | 'help'>('param');
+  const [rightTab, setRightTab] = useState<'param' | 'dataset' | 'export' | 'gpu' | 'cloud' | 'trainMonitor' | 'predict' | 'help'>('param');
 
   // 选中积木时自动切换到参数面板
   useEffect(() => {
@@ -37,6 +38,7 @@ export default function MainLayout() {
     { value: 'gpu', label: '🖥️ 设备' },
     { value: 'trainMonitor', label: '📈 训练监控' },
     { value: 'cloud', label: '☁️ 云端训练' },
+    { value: 'predict', label: '🔍 推理' },
     { value: 'help', label: '❓ 帮助' },
   ] as const;
 
@@ -96,6 +98,7 @@ export default function MainLayout() {
           {rightTab === 'gpu' && <GPUPanel />}
           {rightTab === 'trainMonitor' && <TrainMonitor />}
           {rightTab === 'cloud' && <CloudPanel />}
+          {rightTab === 'predict' && <PredictPanel />}
           {rightTab === 'help' && <HelpPanel />}
         </div>
 

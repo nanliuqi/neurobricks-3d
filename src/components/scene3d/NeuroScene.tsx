@@ -8,6 +8,7 @@ import GridFloor from './GridFloor';
 import GradientOverlay from './GradientOverlay';
 import ShapeTooltip from './ShapeTooltip';
 import DataFlowParticles from './DataFlowParticles';
+import TrainResultModal from '../training/TrainResultModal';
 import { useRef, useEffect, useState } from 'react';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 
@@ -244,6 +245,9 @@ export default function NeuroScene() {
       {/* 相机控制器 */}
       <CameraControlsBridge />
     </Canvas>
+
+      {/* 训练完成结果模态框 */}
+      <TrainResultModal />
 
       {/* 右键菜单 */}
       {contextMenu && (

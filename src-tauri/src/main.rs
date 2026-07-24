@@ -5,7 +5,7 @@ mod commands;
 
 use std::sync::{Arc, Mutex};
 use commands::gpu::detect_devices;
-use commands::training::{start_training, stop_training, pause_training, step_training, run_gradient_diagnosis, TrainingState};
+use commands::training::{start_training, stop_training, pause_training, step_training, run_gradient_diagnosis, predict_image, TrainingState};
 use commands::export::{save_project, load_project, export_model_weights, export_full_model, export_numpy_weights};
 use commands::dataset::{import_local_images, import_csv, import_excel};
 use commands::cloud::{test_ssh_connection, submit_cloud_training, stop_cloud_training, download_results, poll_cloud_training};
@@ -24,6 +24,7 @@ fn main() {
             pause_training,
             step_training,
             run_gradient_diagnosis,
+            predict_image,
 
             // Project
             save_project,
