@@ -1,5 +1,6 @@
 ﻿import { useLayerStore } from '../../stores/useLayerStore';
 import { LAYER_META_LIST } from '../../types/layer';
+import { toast } from '@/components/ui/Toast';
 
 // Tauri API 动态导入（不使用 isTauri 守卫，直接 try/catch）
 
@@ -38,10 +39,10 @@ export default function SceneStats() {
       if (!filePath) return;
 
       await invoke('save_project', { data: JSON.stringify(config), path: filePath });
-      alert('项目保存成功');
+      toast.success('项目保存成功');
     } catch (error) {
       console.error('Failed to save project:', error);
-      alert('保存失败：' + (error as Error).message);
+      toast.error('保存失败：' + (error as Error).message);
     }
   };
 
@@ -68,10 +69,10 @@ export default function SceneStats() {
         layoutMode: config.layoutMode,
       });
 
-      alert('项目加载成功');
+      toast.success('项目加载成功');
     } catch (error) {
       console.error('Failed to load project:', error);
-      alert('加载失败：' + (error as Error).message);
+      toast.error('加载失败：' + (error as Error).message);
     }
   };
 

@@ -3,6 +3,7 @@ import { useCloudStore } from '@/stores/useCloudStore';
 import { useLayerStore } from '@/stores/useLayerStore';
 import { useDatasetStore } from '@/stores/useDatasetStore';
 import { useCloudTraining } from '@/hooks/useCloudTraining';
+import { toast } from '@/components/ui/Toast';
 import type { TrainConfig } from '@/types/training';
 import type { SSHConfig, SSHAuthType, CloudTaskStatus } from '@/types/cloud';
 
@@ -45,15 +46,15 @@ export default function CloudPanel() {
   // 添加服务器
   const handleAddServer = () => {
     if (!formData.name || !formData.host || !formData.username) {
-      alert('请填写必填字段（名称、主机地址、用户名）');
+      toast.warning('请填写必填字段（名称、主机地址、用户名）');
       return;
     }
     if (formData.authType === 'password' && !formData.password) {
-      alert('请输入密码');
+      toast.warning('请输入密码');
       return;
     }
     if (formData.authType === 'private_key' && !formData.privateKeyPath) {
-      alert('请输入私钥路径');
+      toast.warning('请输入私钥路径');
       return;
     }
 
@@ -89,21 +90,21 @@ export default function CloudPanel() {
     try {
       const { invoke } = await import('@tauri-apps/api/tauri');
       await invoke('test_ssh_connection', { config });
-      alert(`✅ 连接到 ${config.name} 成功！`);
+      toast.success(`连接到 ${config.name} 成功！`);
     } catch (error) {
       console.error('Connection test failed:', error);
-      alert(`❌ 连接失败：${(error as Error).message}`);
+      toast.error(`连接失败：${(error as Error).message}`);
     }
   };
 
   // 提交云端训练
   const handleSubmitTraining = async () => {
     if (layers.length === 0) {
-      alert('请先添加网络层');
+      toast.warning('请先添加网络层');
       return;
     }
     if (!datasetInfo) {
-      alert('请先在数据集面板中选择数据集');
+      toast.warning('请先在数据集面板中选择数据集');
       return;
     }
     const trainConfig: TrainConfig = {
@@ -124,7 +125,7 @@ export default function CloudPanel() {
       // 获取选中的服务器配置
       const selectedServer = servers.find(s => s.id === selectedServerId);
       if (!selectedServer) {
-        alert('请选择服务器');
+        toast.warning('请选择服务器');
         return;
       }
 
@@ -132,10 +133,10 @@ export default function CloudPanel() {
         serverConfig: selectedServer, 
         trainConfig 
       });
-      alert('训练任务已提交到云端');
+      toast.success('训练任务已提交到云端');
     } catch (error) {
       console.error('Failed to submit cloud training:', error);
-      alert('提交失败：' + (error as Error).message);
+      toast.error('提交失败：' + (error as Error).message);
     }
   };
 

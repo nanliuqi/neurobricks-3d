@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useLayerStore } from '@/stores/useLayerStore';
 import { useTrainingStore } from '@/stores/useTrainingStore';
 import { generatePyTorchCode, generateKerasCode } from '@/utils/codeGenerator';
+import { toast } from '@/components/ui/Toast';
 
 /** 浏览器端下载文件 */
 function browserDownload(filename: string, content: string, mimeType = 'text/plain') {
@@ -56,7 +57,7 @@ export default function ExportPanel() {
     try {
       await saveFile('model.py', previewCode, 'text/x-python');
     } catch (error) {
-      alert('导出失败：' + (error as Error).message);
+      toast.error('导出失败：' + (error as Error).message);
     }
   };
 
@@ -65,7 +66,7 @@ export default function ExportPanel() {
     try {
       await saveFile('model_keras.py', previewCode, 'text/x-python');
     } catch (error) {
-      alert('导出失败：' + (error as Error).message);
+      toast.error('导出失败：' + (error as Error).message);
     }
   };
 
@@ -79,10 +80,10 @@ export default function ExportPanel() {
       });
       if (!filePath) return;
       await invoke('export_model_weights', { path: filePath });
-      alert('PyTorch 权重导出成功\n\n使用方法：\nmodel.load_state_dict(torch.load("model_weights.pth"))');
+      toast.success('PyTorch 权重导出成功\n\n使用方法：\nmodel.load_state_dict(torch.load("model_weights.pth"))');
     } catch (error) {
       console.error('Failed to export weights:', error);
-      alert('导出失败：' + (error as Error).message);
+      toast.error('导出失败：' + (error as Error).message);
     }
   };
 
@@ -96,10 +97,10 @@ export default function ExportPanel() {
       });
       if (!filePath) return;
       await invoke('export_full_model', { path: filePath });
-      alert('完整模型导出成功\n\n使用方法：\nmodel = torch.load("model_full.pt")\nmodel.eval()');
+      toast.success('完整模型导出成功\n\n使用方法：\nmodel = torch.load("model_full.pt")\nmodel.eval()');
     } catch (error) {
       console.error('Failed to export full model:', error);
-      alert('导出失败：' + (error as Error).message);
+      toast.error('导出失败：' + (error as Error).message);
     }
   };
 
@@ -113,17 +114,17 @@ export default function ExportPanel() {
       });
       if (!filePath) return;
       await invoke('export_numpy_weights', { path: filePath });
-      alert('NumPy 权重导出成功\n\n使用方法：\nimport numpy as np\ndata = np.load("model_weights.npz")\nfor key in data.files:\n    print(key, data[key].shape)');
+      toast.success('NumPy 权重导出成功\n\n使用方法：\nimport numpy as np\ndata = np.load("model_weights.npz")\nfor key in data.files:\n    print(key, data[key].shape)');
     } catch (error) {
       console.error('Failed to export numpy weights:', error);
-      alert('导出失败：' + (error as Error).message);
+      toast.error('导出失败：' + (error as Error).message);
     }
   };
 
   const handleExportLogs = async () => {
     try {
       if (!metrics || metrics.length === 0) {
-        alert('暂无训练日志可导出');
+        toast.warning('暂无训练日志可导出');
         return;
       }
       const headers = Object.keys(metrics[0]).join(',');
@@ -132,7 +133,7 @@ export default function ExportPanel() {
       await saveFile('training_log.csv', csv, 'text/csv');
     } catch (error) {
       console.error('Failed to export training logs:', error);
-      alert('导出失败：' + (error as Error).message);
+      toast.error('导出失败：' + (error as Error).message);
     }
   };
 
@@ -140,7 +141,7 @@ export default function ExportPanel() {
     try {
       const logs = useTrainingStore.getState().logs;
       if (!logs || logs.length === 0) {
-        alert('暂无训练日志可导出');
+        toast.warning('暂无训练日志可导出');
         return;
       }
       const lines = logs.map(log => {
@@ -151,12 +152,12 @@ export default function ExportPanel() {
       await saveFile('training_log.txt', content, 'text/plain');
     } catch (error) {
       console.error('Failed to export logs:', error);
-      alert('导出失败：' + (error as Error).message);
+      toast.error('导出失败：' + (error as Error).message);
     }
   };
 
   const handleExportChart = async () => {
-    alert('📈 曲线图导出功能开发中');
+    toast.info('曲线图导出功能开发中');
   };
 
   // --- 项目保存 / 加载 ---
@@ -197,10 +198,10 @@ export default function ExportPanel() {
       if (!filePath) return;
 
       await invoke('save_project', { data: JSON.stringify(projectData, null, 2), path: filePath });
-      alert('项目保存成功');
+      toast.success('项目保存成功');
     } catch (error) {
       console.error('Failed to save project:', error);
-      alert('保存失败：' + (error as Error).message);
+      toast.error('保存失败：' + (error as Error).message);
     }
   };
 
@@ -220,7 +221,7 @@ export default function ExportPanel() {
 
       // 大文件保护：超过 10MB 拒绝解析，避免冻结 UI
       if (jsonStr.length > 10 * 1024 * 1024) {
-        alert('文件过大（超过 10MB），不是有效的项目文件');
+        toast.error('文件过大（超过 10MB），不是有效的项目文件');
         return;
       }
 
@@ -228,7 +229,7 @@ export default function ExportPanel() {
 
       // 结构完整性检查
       if (!data.version || !data.tower || !Array.isArray(data.tower.layers)) {
-        alert('无效的项目文件：缺少必要字段（version / tower.layers）');
+        toast.error('无效的项目文件：缺少必要字段（version / tower.layers）');
         return;
       }
 
@@ -252,7 +253,7 @@ export default function ExportPanel() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const validLayers = repairedLayers.filter((l: any) => typeof l.type === 'string' && l.type.length > 0);
       if (validLayers.length === 0) {
-        alert('无效的项目文件：未找到有效的网络层');
+        toast.error('无效的项目文件：未找到有效的网络层');
         return;
       }
 
@@ -262,10 +263,10 @@ export default function ExportPanel() {
       useLayerStore.getState().loadProject({ layers: validLayers, layoutMode });
 
       const skipped = data.tower.layers.length - validLayers.length;
-      alert(`项目加载成功（${validLayers.length} 层${skipped > 0 ? `，跳过 ${skipped} 个无效层` : ''}）`);
+      toast.success(`项目加载成功（${validLayers.length} 层${skipped > 0 ? `，跳过 ${skipped} 个无效层` : ''}）`);
     } catch (error) {
       console.error('Failed to load project:', error);
-      alert('加载失败：' + (error as Error).message);
+      toast.error('加载失败：' + (error as Error).message);
     }
   };
 

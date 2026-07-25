@@ -27,11 +27,16 @@ def main():
         sys.exit(1)
     
     try:
-        # 构建模型
-        model_and_shape = build_model(config['layers'])
-        
-        # 开始训练
-        train(model_and_shape, config)
+        mode = config.get('mode', 'train')
+
+        if mode == 'predict':
+            # 推理模式：延迟导入 predict 模块（避免训练时加载 PIL 等额外依赖）
+            from predict import predict
+            predict(config)
+        else:
+            # 训练模式（默认）
+            model_and_shape = build_model(config['layers'])
+            train(model_and_shape, config)
     except Exception as e:
         # 任何未捕获的异常都通知前端
         import traceback

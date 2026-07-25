@@ -136,7 +136,7 @@ pub fn start_training(
                 find_trainer_exe(&dist_path)
             })
         })
-        .ok_or_else(|| "找不到训练 sidecar（nb-trainer.exe 或 main.py）".to_string())?;
+        .ok_or_else(|| "训练模块未正确安装。请重新安装应用，或在设置中检查训练引擎路径。".to_string())?;
 
     // 启动训练进程
     eprintln!("[NeuroBricks] Starting trainer: {:?} {:?}", program, args);
@@ -384,8 +384,9 @@ pub fn predict_image(
     // 解析模型权重路径（多位置搜索）
     let resolved_model = resolve_model_path(&model_path)?;
 
-    // 构建 config JSON
+    // 构建 predict 配置（添加 mode 字段区分训练/推理）
     let config = serde_json::json!({
+        "mode": "predict",
         "modelPath": resolved_model,
         "imagePath": image_path,
         "layers": layers,
@@ -411,23 +412,37 @@ pub fn predict_image(
         })
         .ok_or("找不到 sidecar 目录")?;
 
-    // 查找 Python
-    let python_path = std::env::var("PYTHON").unwrap_or_else(|_| "python".to_string());
-    let script_path = sidecar_path.join("predict.py");
+    // 查找 nb-trainer 可执行文件（复用训练 sidecar 的查找逻辑：优先 exe，回退 Python + main.py）
+    let (program, args) = find_trainer_exe(&sidecar_path)
+        .or_else(|| {
+            sidecar_path.parent().and_then(|parent| {
+                let dist_path = parent.join("dist").join("nb-trainer");
+                find_trainer_exe(&dist_path)
+            })
+        })
+        .ok_or_else(|| "推理模块未正确安装。请重新安装应用。".to_string())?;
 
-    if !script_path.exists() {
-        return Err(format!("predict.py 不存在: {:?}", script_path));
-    }
-
-    // 执行 Python 脚本
-    let output = Command::new(&python_path)
-        .arg(&script_path)
-        .arg(&config_str)
+    // 通过 stdin 传入配置（同训练方式），读取 stdout 结果
+    let mut child = Command::new(program)
+        .args(&args)
         .current_dir(&sidecar_path)
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .output()
-        .map_err(|e| format!("启动推理进程失败: {}", e))?;
+        .spawn()
+        .map_err(|e| format!("无法启动推理进程: {}", e))?;
+
+    // 写入配置到 stdin
+    {
+        let stdin = child.stdin.as_mut().ok_or("无法获取 stdin")?;
+        use std::io::Write;
+        stdin.write_all(config_str.as_bytes()).map_err(|e| e.to_string())?;
+        stdin.write_all(b"\n").map_err(|e| e.to_string())?;
+        stdin.flush().map_err(|e| e.to_string())?;
+    }
+
+    // 等待进程结束，读取 stdout
+    let output = child.wait_with_output().map_err(|e| format!("等待推理进程失败: {}", e))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -441,7 +456,7 @@ pub fn predict_image(
         return Err(format!("推理无输出。stderr: {}", stderr));
     }
 
-    // 验证 stdout 是合法 JSON（修正：不能用 parse::<String>，那要求 JSON 引号字符串）
+    // 验证 stdout 是合法 JSON
     serde_json::from_str::<serde_json::Value>(trimmed)
         .map_err(|e| format!("解析推理结果失败: {} | stdout: {}", e, trimmed))?;
 

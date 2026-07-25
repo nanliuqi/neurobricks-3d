@@ -1,0 +1,10 @@
+{
+  "version": "0.1.0",
+  "notes": "NeuroBricks 3D 首个版本",
+  "pub_date": "2026-07-25",
+  "platforms": {
+    "windows-x86_64": {
+      "url": "https://github.com/nanliuqi/neurobricks-3d/releases/download/v0.1.0/NeuroBricks3D_0.1.0_x64-setup.exe"
+    }
+  }
+}

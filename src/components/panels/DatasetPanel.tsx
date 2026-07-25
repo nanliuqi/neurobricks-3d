@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useDatasetStore } from '@/stores/useDatasetStore';
 import { useLayerStore } from '@/stores/useLayerStore';
 import { adaptLayersToInputShape } from '@/utils/shapeInference';
+import { toast } from '@/components/ui/Toast';
 import type { DatasetInfo, DatasetType } from '@/types/dataset';
 
 const BUILTIN_DATASETS = [
@@ -141,8 +142,8 @@ export default function DatasetPanel() {
         l => l.type === 'Conv2D' || l.type === 'MaxPool2D' || l.type === 'AvgPool2D'
       );
       if (hasConvLayers) {
-        window.alert(
-          '⚠️ CSV 是表格数据，不支持卷积/池化层。\n当前网络包含卷积层，无法自动适配，请改用全连接结构（Input → Flatten → Linear）。'
+        toast.warning(
+          'CSV 是表格数据，不支持卷积/池化层。\n当前网络包含卷积层，无法自动适配，请改用全连接结构（Input → Flatten → Linear）。'
         );
         return;
       }
@@ -176,7 +177,7 @@ export default function DatasetPanel() {
 
       // TODO: 实现 Excel 导入逻辑
       console.warn('Excel import not implemented yet');
-      alert('📊 Excel 导入功能开发中，请使用 CSV 文件或内置数据集');
+      toast.info('Excel 导入功能开发中，请使用 CSV 文件或内置数据集');
     } catch (error) {
       console.error('Failed to import Excel:', error);
     } finally {

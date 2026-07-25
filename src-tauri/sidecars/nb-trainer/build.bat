@@ -11,8 +11,8 @@ REM 创建 venv（如果不存在）
 if not exist "%PYTHON%" (
     echo Creating clean venv...
     C:\Users\64122\anaconda3\python.exe -m venv %VENV_DIR% --clear
-    echo Installing torch + torchvision (cu128)...
-    %VENV_DIR%\Scripts\pip.exe install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+    echo Installing torch + torchvision (CPU-only)...
+    %VENV_DIR%\Scripts\pip.exe install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 )
 
 REM 安装 PyInstaller（如果没有）
@@ -29,9 +29,11 @@ echo Building nb-trainer...
     --workpath ../build ^
     --add-data "models.py;." ^
     --add-data "train.py;." ^
+    --add-data "predict.py;." ^
     --hidden-import torch ^
     --hidden-import torchvision ^
     --hidden-import torchvision.datasets ^
+    --hidden-import PIL ^
     --collect-submodules torch.nn ^
     --collect-submodules torchvision ^
     main.py

@@ -1,5 +1,7 @@
 import { useEffect } from 'react';
 import MainLayout from './components/layout/MainLayout';
+import { ToastContainer } from './components/ui/Toast';
+import { useUpdateChecker } from './hooks/useUpdateChecker';
 import { useTrainingStore } from './stores/useTrainingStore';
 import { useLayerStore } from './stores/useLayerStore';
 
@@ -7,6 +9,7 @@ const AUTOSAVE_KEY = 'neurobricks_autosave';
 
 export default function App() {
   const layers = useLayerStore(state => state.layers);
+  const updateInfo = useUpdateChecker();
 
   // 自动保存：每 30 秒将网络结构序列化到 localStorage
   useEffect(() => {
@@ -153,5 +156,55 @@ export default function App() {
     };
   }, []);
 
-  return <MainLayout />;
+  return (
+    <>
+      <MainLayout />
+      <ToastContainer />
+      {updateInfo.available && (
+        <div style={{
+          position: 'fixed',
+          bottom: '16px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 9998,
+          backgroundColor: '#1e293b',
+          border: '1px solid #3b82f6',
+          borderRadius: '8px',
+          padding: '12px 20px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+        }}>
+          <span style={{ color: '#93c5fd', fontSize: '13px' }}>
+            发现新版本 v{updateInfo.version}，建议更新
+          </span>
+          <button
+            onClick={async () => {
+              try {
+                const { installUpdate } = await import('@tauri-apps/api/updater');
+                await installUpdate();
+                const { relaunch } = await import('@tauri-apps/api/process');
+                await relaunch();
+              } catch (e) {
+                console.error('Update failed:', e);
+              }
+            }}
+            style={{
+              padding: '6px 16px',
+              backgroundColor: '#3b82f6',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '12px',
+              fontWeight: 600,
+            }}
+          >
+            立即更新
+          </button>
+        </div>
+      )}
+    </>
+  );
 }
