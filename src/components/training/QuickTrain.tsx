@@ -161,7 +161,7 @@ export default function QuickTrain() {
         ? [inputLayer.params.inChannels, inputLayer.params.inputHeight, inputLayer.params.inputWidth]
         : undefined;
 
-    // 构建训练配置
+    // 构建训练配置（modelId 用于将权重另存到独立文件，支持多模型卡片化推理）
     const config: TrainConfig = {
       epochs,
       learningRate,
@@ -177,6 +177,7 @@ export default function QuickTrain() {
       dataPath: datasetPath || undefined,
       trainRatio,
       inputShape,
+      modelId: crypto.randomUUID(),
     };
 
     try {

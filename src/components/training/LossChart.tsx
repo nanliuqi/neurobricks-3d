@@ -6,12 +6,19 @@ import type { TrainMetric } from '@/types/training';
  * 简易 Loss/Accuracy 曲线图
  * 使用 Canvas 直接绘制，无需 echarts 依赖
  * 用 requestAnimationFrame 节流，每帧最多重绘一次
+ * 支持传入外部数据源 data（独立曲线窗口用），并通过 ResizeObserver 在容器缩放时重绘
  */
-export default function LossChart() {
-  const metrics = useTrainingStore(state => state.metrics);
+interface LossChartProps {
+  /** 可选外部数据源；未提供时读取训练 store 的实时 metrics */
+  data?: TrainMetric[];
+}
+
+export default function LossChart({ data }: LossChartProps) {
+  const storeMetrics = useTrainingStore(state => state.metrics);
+  const chartData = data ?? storeMetrics;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const metricsRef = useRef(metrics);
+  const dataRef = useRef(chartData);
   const rafRef = useRef<number | null>(null);
 
   // 绘制函数（从原 useEffect 中提取）
@@ -159,17 +166,28 @@ export default function LossChart() {
     ctx.fillText(`${(latest.accuracy * 100).toFixed(1)}%`, width - padding.right + 5, toYAcc(latest.accuracy) + 3);
   }, []);
 
-  // metrics 变化时通过 RAF 节流重绘（每帧最多一次）
+  // chartData 变化时通过 RAF 节流重绘（每帧最多一次）
   useEffect(() => {
-    metricsRef.current = metrics;
+    dataRef.current = chartData;
 
     if (rafRef.current === null) {
       rafRef.current = requestAnimationFrame(() => {
         rafRef.current = null;
-        drawChart(metricsRef.current);
+        drawChart(dataRef.current);
       });
     }
-  }, [metrics, drawChart]);
+  }, [chartData, drawChart]);
+
+  // 容器尺寸变化（如独立曲线窗口被用户缩放）时重绘
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const ro = new ResizeObserver(() => {
+      drawChart(dataRef.current);
+    });
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, [drawChart]);
 
   // 清理动画帧
   useEffect(() => {

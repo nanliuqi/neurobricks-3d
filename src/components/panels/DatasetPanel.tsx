@@ -112,6 +112,7 @@ export default function DatasetPanel() {
       }
     } catch (error) {
       console.error('Failed to import images:', error);
+      toast.error('导入图像数据集失败：' + (error as Error).message);
     } finally {
       setLoading(false);
     }
@@ -156,6 +157,7 @@ export default function DatasetPanel() {
       }
     } catch (error) {
       console.error('Failed to import CSV:', error);
+      toast.error('导入 CSV 失败：' + (error as Error).message);
     } finally {
       setLoading(false);
     }
@@ -180,6 +182,7 @@ export default function DatasetPanel() {
       toast.info('Excel 导入功能开发中，请使用 CSV 文件或内置数据集');
     } catch (error) {
       console.error('Failed to import Excel:', error);
+      toast.error('导入 Excel 失败：' + (error as Error).message);
     } finally {
       setLoading(false);
     }

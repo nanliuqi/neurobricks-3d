@@ -4,8 +4,26 @@ import { ToastContainer } from './components/ui/Toast';
 import { useUpdateChecker } from './hooks/useUpdateChecker';
 import { useTrainingStore } from './stores/useTrainingStore';
 import { useLayerStore } from './stores/useLayerStore';
+import { writeChartMetricsNow } from './utils/chartSync';
 
 const AUTOSAVE_KEY = 'neurobricks_autosave';
+
+/** 判断当前是否为主窗口。
+ * 重要：自动保存恢复使用 window.confirm（进程级模态框），若在任何非主窗口（如曲线弹窗）误触发，
+ * 会冻结整个应用。因此该逻辑仅限主窗口执行。 */
+function isMainWindow(): boolean {
+  try {
+    const meta = (window as unknown as { __TAURI_METADATA__?: { __currentWindow?: { label?: string } } }).__TAURI_METADATA__;
+    // 能读到元数据时，仅当 label 为 main 才视为主窗口
+    if (meta?.__currentWindow?.label) {
+      return meta.__currentWindow.label === 'main';
+    }
+  } catch {
+    // 忽略
+  }
+  // 无法判断时（纯浏览器环境）默认允许
+  return true;
+}
 
 export default function App() {
   const layers = useLayerStore(state => state.layers);
@@ -35,8 +53,9 @@ export default function App() {
     return () => clearInterval(saveTimer);
   }, []);
 
-  // 启动时检查自动保存数据，提示用户恢复
+  // 启动时检查自动保存数据，提示用户恢复（仅主窗口，避免 window.confirm 模态框冻结其他窗口）
   useEffect(() => {
+    if (!isMainWindow()) return;
     try {
       const raw = localStorage.getItem(AUTOSAVE_KEY);
       if (!raw) return;
@@ -86,6 +105,13 @@ export default function App() {
     let unlisteners: (() => void)[] = [];
     let lastProgressTime = Date.now();
 
+    // 训练开始时重置心跳时间戳（避免应用启动后等待超过60秒再开始训练时立即触发超时）
+    const unsubTrainingStart = useTrainingStore.subscribe((state, prevState) => {
+      if (state.isTraining && !prevState.isTraining) {
+        lastProgressTime = Date.now();
+      }
+    });
+
     // 心跳检测：每 15 秒检查一次，60 秒无任何进度更新则判定超时
     const heartbeatTimer = setInterval(() => {
       const store = useTrainingStore.getState();
@@ -93,6 +119,16 @@ export default function App() {
         store.setError('训练超时：60 秒内无进度更新，训练进程可能已停止响应');
       }
     }, 15000);
+
+    // 独立曲线窗口数据同步：将曲线数据写入 localStorage（同源窗口共享），
+    // chart.html 每 500ms 轮询读取。节流 600ms，避免频繁序列化大数组
+    let lastChartSync = 0;
+    const syncChartMetrics = (force = false) => {
+      const now = Date.now();
+      if (!force && now - lastChartSync < 600) return;
+      lastChartSync = now;
+      writeChartMetricsNow();
+    };
 
     (async () => {
       try {
@@ -113,6 +149,7 @@ export default function App() {
               accuracy: data.accuracy ?? 0,
               timestamp: Date.now(),
             });
+            syncChartMetrics();
           } else if (data.type === 'epoch_end') {
             store.updateProgress({
               epoch: data.epoch ?? 0,
@@ -121,11 +158,14 @@ export default function App() {
               accuracy: data.valAccuracy ?? data.val_accuracy ?? 0,
               timestamp: Date.now(),
             });
+            syncChartMetrics();
           } else if (data.type === 'done') {
             // 仅在训练进行中时处理，避免与 training-done 事件重复调用
             if (store.isTraining) {
               store.finishTraining(data.finalAccuracy ?? data.final_accuracy ?? 0);
             }
+            // 训练结束强制同步一次，确保曲线窗口展示完整数据
+            syncChartMetrics(true);
           } else if (data.type === 'log') {
             const level = data.level === 'warning' ? 'warn' : data.level || 'info';
             store.addLog(level, data.message ?? '');
@@ -153,6 +193,7 @@ export default function App() {
     return () => {
       unlisteners.forEach((unlisten) => unlisten());
       clearInterval(heartbeatTimer);
+      unsubTrainingStart();
     };
   }, []);
 

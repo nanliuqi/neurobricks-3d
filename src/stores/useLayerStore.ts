@@ -53,8 +53,9 @@ function recomputeLayerStats(layers: Layer3D[], defaultInputShape: TensorShape =
           errorType: 'param_conflict',
           message: `Conv2D 输入通道不匹配：inChannels=${declaredInChannels}，但上游输出为 ${formatShape(currentShape)}`,
           suggestion: `将 inChannels 修改为 ${currentShape[0]}`,
+          // 期望 = 上游真实输出（应改成的目标值）；实际 = 当前层声明值（错误值）
           expectedInputShape: currentShape,
-          actualInputShape: currentShape,
+          actualInputShape: [declaredInChannels, currentShape[1], currentShape[2]],
         });
       }
     }
@@ -69,8 +70,9 @@ function recomputeLayerStats(layers: Layer3D[], defaultInputShape: TensorShape =
           errorType: 'param_conflict',
           message: `Linear 输入特征不匹配：inFeatures=${declaredInFeatures}，但上游输出为 ${formatShape(currentShape)}`,
           suggestion: `将 inFeatures 修改为 ${currentShape[0]}`,
+          // 期望 = 上游真实输出（应改成的目标值）；实际 = 当前层声明值（错误值）
           expectedInputShape: currentShape,
-          actualInputShape: currentShape,
+          actualInputShape: [declaredInFeatures],
         });
       }
     }

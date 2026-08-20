@@ -45,6 +45,7 @@
         "sidecars/nb-trainer/main.py",
         "sidecars/nb-trainer/models.py",
         "sidecars/nb-trainer/train.py",
+        "sidecars/nb-trainer/predict.py",
         "sidecars/nb-trainer/requirements.txt",
         "sidecars/nb-trainer/data/**",
         "sidecars/dist/nb-trainer/**"
@@ -58,7 +59,7 @@
       ]
     },
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data: blob: asset: https://asset.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost"
+      "csp": null
     },
     "updater": {
       "active": false,
@@ -77,6 +78,17 @@
         "minHeight": 600,
         "decorations": false,
         "resizable": true
+      },
+      {
+        "label": "chart-view",
+        "title": "训练曲线",
+        "url": "chart.html",
+        "width": 960,
+        "height": 620,
+        "minWidth": 480,
+        "minHeight": 320,
+        "resizable": true,
+        "visible": false
       }
     ]
   }

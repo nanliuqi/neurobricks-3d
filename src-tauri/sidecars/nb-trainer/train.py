@@ -225,15 +225,16 @@ def get_dataset(dataset_name, batch_size, data_dir, config=None):
         log_message("error", message=f"Failed to load dataset '{dataset_name}': {str(e)}")
         return None, None
     
-    # GPU 时启用 pin_memory 加速数据传输，num_workers 并行加载
+    # GPU 时启用 pin_memory 加速数据传输
+    # num_workers 必须为 0：Windows GUI 应用（无控制台）下 DataLoader 的 spawn 多进程会挂起
     pin_memory = torch.cuda.is_available()
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=batch_size, shuffle=True,
-        num_workers=2, pin_memory=pin_memory, drop_last=False
+        num_workers=0, pin_memory=pin_memory, drop_last=False
     )
     test_loader = torch.utils.data.DataLoader(
         test_dataset, batch_size=batch_size, shuffle=False,
-        num_workers=2, pin_memory=pin_memory, drop_last=False
+        num_workers=0, pin_memory=pin_memory, drop_last=False
     )
     return train_loader, test_loader
 
@@ -422,8 +423,9 @@ def train(model_and_shape, config):
     # 训练完成
     if not controller.should_stop:
         final_accuracy = val_correct / max(val_total, 1)
-        log_message("done", finalAccuracy=round(final_accuracy, 4))
-        
+        # 注意：done 消息延迟到权重全部保存完成后再发出，
+        # 避免前端收到 done 立即生成推理卡片时权重文件尚未写盘
+
         # 保存模型：优先用户目录（打包后 sidecar 目录可能只读）
         user_weights_dir = os.path.join(os.path.expanduser('~'), '.neurobricks')
         os.makedirs(user_weights_dir, exist_ok=True)
@@ -437,6 +439,18 @@ def train(model_and_shape, config):
             weights_path = os.path.join(os.path.dirname(__file__), 'model_weights.pth')
             torch.save(model.state_dict(), weights_path)
         log_message("log", level="info", message=f"Model weights saved to {weights_path}")
+
+        # 1b. 按 modelId 另存独立权重（多模型卡片化推理用）
+        model_id = config.get('modelId') or config.get('model_id') or ''
+        if model_id:
+            try:
+                models_dir = os.path.join(user_weights_dir, 'models')
+                os.makedirs(models_dir, exist_ok=True)
+                per_model_path = os.path.join(models_dir, f'{model_id}.pth')
+                torch.save(model.state_dict(), per_model_path)
+                log_message("log", level="info", message=f"Per-model weights saved to {per_model_path}")
+            except (PermissionError, OSError) as e:
+                log_message("log", level="warning", message=f"Failed to save per-model weights: {e}")
 
         # 2. 完整模型（结构+权重）
         full_model_path = os.path.join(user_weights_dir, 'model_full.pt')
@@ -459,3 +473,6 @@ def train(model_and_shape, config):
             log_message("log", level="warning", message=f"Failed to save NumPy weights: {e}")
         else:
             log_message("log", level="info", message=f"NumPy weights saved to {npz_path}")
+
+        # 所有权重的保存完成后才发出 done，确保前端生成推理卡片时权重已就绪
+        log_message("done", finalAccuracy=round(final_accuracy, 4))

@@ -2,8 +2,15 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tauri::AppHandle;
 use tauri::Manager;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+/// Windows GUI 程序 spawn 控制台子进程时必须加此标志，否则会弹出黑色 cmd 窗口
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -34,6 +41,10 @@ pub struct TrainConfig {
     /// 使数据与模型输入一致（缺失时 Python 回退 3×224×224）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_shape: Option<Vec<u32>>,
+    /// 模型唯一标识：Python 端据此将权重另存到 ~/.neurobricks/models/<model_id>.pth，
+    /// 支持多模型卡片化推理（缺失时仅存默认 model_weights.pth）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_id: Option<String>,
 }
 
 /// 训练状态管理
@@ -81,9 +92,23 @@ fn find_trainer_exe(script_dir: &std::path::Path) -> Option<(std::path::PathBuf,
 }
 
 #[tauri::command]
-pub fn start_training(
+pub async fn start_training(
     app: AppHandle,
     state: tauri::State<'_, Arc<Mutex<TrainingState>>>,
+    config: TrainConfig,
+) -> Result<(), String> {
+    // 训练进程启动涉及文件查找、进程 spawn 等操作，放入阻塞线程池避免占用主线程
+    let state_inner = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        start_training_blocking(app, state_inner, config)
+    })
+    .await
+    .map_err(|e| format!("训练任务调度失败: {}", e))?
+}
+
+fn start_training_blocking(
+    app: AppHandle,
+    state: Arc<Mutex<TrainingState>>,
     config: TrainConfig,
 ) -> Result<(), String> {
     let mut state_guard = state.lock().map_err(|e| e.to_string())?;
@@ -119,38 +144,53 @@ pub fn start_training(
         .ok_or("Failed to resolve sidecar path. Add 'sidecars/nb-trainer/*' to bundle.resources in tauri.conf.json")?;
     
     eprintln!("[NeuroBricks] Sidecar path: {:?}", sidecar_path);
-    
-    let _script_path = sidecar_path.join("main.py");
-    
-    
-    let work_dir = sidecar_path.clone();
 
-    // 查找可执行文件（优先 exe，回退 Python）
-    // 生产环境中 exe 在 sidecars/dist/nb-trainer/ 下，开发环境在 sidecars/nb-trainer/ 下
-    let (program, args) = find_trainer_exe(&sidecar_path)
-        .or_else(|| {
-            // 生产环境：exe 在 sidecars/dist/nb-trainer/ 目录
-            sidecar_path.parent().and_then(|parent| {
-                let dist_path = parent.join("dist").join("nb-trainer");
-                eprintln!("[NeuroBricks] Trying dist path: {:?}", dist_path);
-                find_trainer_exe(&dist_path)
-            })
+    // 查找可执行文件：优先 sidecars/dist/nb-trainer/ 下打包好的 exe（生产环境，自包含 CPU-only torch，
+    // 不依赖用户 Python 环境），回退 Python 解释器 + main.py（开发环境）
+    let (program, args) = sidecar_path
+        .parent()
+        .map(|parent| parent.join("dist").join("nb-trainer"))
+        .as_ref()
+        .and_then(|dist_path| {
+            eprintln!("[NeuroBricks] Trying dist path: {:?}", dist_path);
+            find_trainer_exe(dist_path)
         })
-        .ok_or_else(|| "训练模块未正确安装。请重新安装应用，或在设置中检查训练引擎路径。".to_string())?;
+        .or_else(|| find_trainer_exe(&sidecar_path))
+        .ok_or_else(|| "训练模块未正确安装。请重新安装应用。".to_string())?;
+
+    // 工作目录：优先 sidecar 源码目录（含 data/ 内置数据集），不存在时用 exe 所在目录
+    let work_dir = if sidecar_path.exists() {
+        sidecar_path.clone()
+    } else {
+        program.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| sidecar_path.clone())
+    };
 
     // 启动训练进程
     eprintln!("[NeuroBricks] Starting trainer: {:?} {:?}", program, args);
+    eprintln!("[NeuroBricks] Work dir: {:?}", work_dir);
     
-    let mut child = Command::new(program)
-        .args(&args)
-        .current_dir(work_dir)
+    let mut cmd = Command::new(&program);
+    cmd.args(&args)
+        .current_dir(&work_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("Failed to start training process: {}", e))?;
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let mut child = cmd.spawn()
+        .map_err(|e| format!("训练进程启动失败 ({:?}): {}", program, e))?;
     
-    eprintln!("[NeuroBricks] Python process started, PID: {:?}", child.id());
+    let pid = child.id();
+    eprintln!("[NeuroBricks] Python process started, PID: {:?}", pid);
+
+    // 立即发送启动诊断信息到前端（确认事件系统工作 + 显示实际使用的路径）
+    let _ = app.get_window("main").and_then(|w| {
+        w.emit("training-progress", &serde_json::json!({
+            "type": "log",
+            "level": "info",
+            "message": format!("训练进程已启动 (PID: {})\n程序: {}\n工作目录: {}", pid, program.display(), work_dir.display())
+        })).ok()
+    });
 
     // 写入配置到 stdin,但保留句柄
     {
@@ -174,44 +214,88 @@ pub fn start_training(
     state_guard.child_process = Some(child);
     drop(state_guard);
 
-    // 在新线程中读取 stdout
+    // 在新线程中读取 stdout/stderr 并转发事件到前端
     let app_clone = app.clone();
-    let state_clone = state.inner().clone();
+    let state_clone = state.clone();
 
     std::thread::spawn(move || {
+        use std::io::{BufRead, BufReader};
+        use std::sync::atomic::{AtomicBool, Ordering};
+
         let mut state_guard = state_clone.lock().unwrap();
         let stdout = match state_guard.child_process.as_mut() {
             Some(child) => child.stdout.take(),
             None => return,
         };
-        // 同时取走 stderr
         let stderr = state_guard.child_process.as_mut().and_then(|c| c.stderr.take());
         drop(state_guard);
 
-        // stderr 单独读取线程
-        if let Some(stderr) = stderr {
+        // 共享：stderr 内容缓冲 + 是否收到 done 标记 + 是否收到任何输出
+        let stderr_buf: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let got_done = Arc::new(AtomicBool::new(false));
+        let got_any_output = Arc::new(AtomicBool::new(false));
+
+        // 15秒启动超时检测：如果进程启动后15秒无任何输出，发送警告
+        {
+            let app_timeout = app_clone.clone();
+            let output_flag = got_any_output.clone();
+            let done_flag = got_done.clone();
             std::thread::spawn(move || {
-                use std::io::{BufRead, BufReader};
+                std::thread::sleep(Duration::from_secs(15));
+                if !output_flag.load(Ordering::SeqCst) && !done_flag.load(Ordering::SeqCst) {
+                    let _ = app_timeout.get_window("main").and_then(|w| {
+                        w.emit("training-progress", &serde_json::json!({
+                            "type": "log",
+                            "level": "warning",
+                            "message": "训练进程启动已15秒但无任何输出，可能是训练模块未正确安装或Python环境缺少依赖"
+                        })).ok()
+                    });
+                }
+            });
+        }
+
+        // stderr 读取线程：收集内容并实时转发到前端（让用户立即看到错误）
+        if let Some(stderr) = stderr {
+            let app_err = app_clone.clone();
+            let buf_clone = stderr_buf.clone();
+            let output_flag = got_any_output.clone();
+            std::thread::spawn(move || {
                 let reader = BufReader::new(stderr);
                 for line_str in reader.lines().map_while(Result::ok) {
+                    output_flag.store(true, Ordering::SeqCst);
                     eprintln!("[Python stderr] {}", line_str);
+                    // 保留最后 50 行
+                    let mut buf = buf_clone.lock().unwrap();
+                    if buf.len() >= 50 { buf.remove(0); }
+                    buf.push(line_str.clone());
+                    drop(buf);
+                    // 实时转发到前端（作为 error 级别日志）
+                    let _ = app_err.get_window("main").and_then(|w| {
+                        w.emit("training-progress", &serde_json::json!({
+                            "type": "log",
+                            "level": "error",
+                            "message": line_str
+                        })).ok()
+                    });
                 }
             });
         }
 
         let stdout = stdout.unwrap();
-        
-        use std::io::{BufRead, BufReader};
         let reader = BufReader::new(stdout);
 
         for line in reader.lines() {
             match line {
                 Ok(line_str) => {
-                    // 尝试解析 JSON
+                    got_any_output.store(true, Ordering::SeqCst);
                     if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&line_str) {
                         if let Some(event_type) = json_value.get("type").and_then(|v| v.as_str()) {
                             match event_type {
-                                "progress" | "epoch_end" | "done" => {
+                                "progress" | "epoch_end" => {
+                                    let _ = app_clone.get_window("main").and_then(|w| w.emit("training-progress", &json_value).ok());
+                                }
+                                "done" => {
+                                    got_done.store(true, Ordering::SeqCst);
                                     let _ = app_clone.get_window("main").and_then(|w| w.emit("training-progress", &json_value).ok());
                                 }
                                 "error" => {
@@ -231,20 +315,27 @@ pub fn start_training(
         }
 
         // stdout 关闭 = 进程已结束
-        // 检查进程退出状态，异常退出时发送 error 事件
-        let exit_status = state_clone.lock().unwrap()
-            .child_process.as_mut()
-            .and_then(|c| c.try_wait().ok().flatten());
+        // 短暂等待让 stderr 线程收集完最后的输出
+        std::thread::sleep(Duration::from_millis(500));
 
-        if let Some(status) = exit_status {
-            if !status.success() {
-                let _ = app_clone.get_window("main").and_then(|w| {
-                    w.emit("training-error", &serde_json::json!({
-                        "type": "error",
-                        "message": "训练进程异常退出，请检查网络结构是否正确"
-                    })).ok()
-                });
-            }
+        let received_done = got_done.load(Ordering::SeqCst);
+
+        if !received_done {
+            // 未收到 done 消息 → 进程异常退出，将 stderr 内容作为错误信息发给前端
+            let stderr_lines = stderr_buf.lock().unwrap();
+            let err_msg = if stderr_lines.is_empty() {
+                "训练进程异常退出（无错误输出），请检查网络结构和数据集配置".to_string()
+            } else {
+                // 取最后 10 行 stderr 作为错误摘要
+                let start = stderr_lines.len().saturating_sub(10);
+                format!("训练进程异常退出：\n{}", stderr_lines[start..].join("\n"))
+            };
+            let _ = app_clone.get_window("main").and_then(|w| {
+                w.emit("training-error", &serde_json::json!({
+                    "type": "error",
+                    "message": err_msg
+                })).ok()
+            });
         }
 
         // 无论正常还是异常，都发 done 让前端结束训练状态
@@ -332,6 +423,19 @@ pub fn run_gradient_diagnosis() -> Result<String, String> {
     Err("梯度诊断功能尚未实现，将在后续版本中支持".to_string())
 }
 
+/// 打开独立训练曲线窗口。
+/// 窗口在应用启动时已预创建（隐藏状态，见 tauri.conf.json 与 main.rs setup），
+/// 此处只做 show + focus——绝不在 IPC 命令内运行时创建 WebView2 窗口
+/// （那会在 Windows 上死锁主线程，导致白窗口 + 整个应用冻结）。
+/// 曲线数据由主窗口写入 localStorage（同源共享），chart.html 轮询读取。
+#[tauri::command]
+pub fn open_chart_window(app: AppHandle) -> Result<(), String> {
+    let w = app.get_window("chart-view").ok_or("曲线窗口不可用，请重启应用")?;
+    w.show().map_err(|e| format!("打开曲线窗口失败: {}", e))?;
+    w.set_focus().map_err(|e| format!("聚焦曲线窗口失败: {}", e))?;
+    Ok(())
+}
+
 /// 在多个已知位置搜索模型权重文件（同 export.rs 逻辑）
 fn resolve_model_path(model_path: &str) -> Result<String, String> {
     // 如果前端传了具体路径且存在，直接用
@@ -374,7 +478,22 @@ fn resolve_model_path(model_path: &str) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn predict_image(
+pub async fn predict_image(
+    app: AppHandle,
+    model_path: String,
+    image_path: String,
+    layers: serde_json::Value,
+    input_shape: Vec<u32>,
+) -> Result<String, String> {
+    // 推理需要加载 torch + 模型（数秒至数十秒），放入阻塞线程池执行，避免冻结 UI 主线程
+    tauri::async_runtime::spawn_blocking(move || {
+        predict_image_blocking(app, model_path, image_path, layers, input_shape)
+    })
+    .await
+    .map_err(|e| format!("推理任务调度失败: {}", e))?
+}
+
+fn predict_image_blocking(
     app: AppHandle,
     model_path: String,
     image_path: String,
@@ -412,24 +531,32 @@ pub fn predict_image(
         })
         .ok_or("找不到 sidecar 目录")?;
 
-    // 查找 nb-trainer 可执行文件（复用训练 sidecar 的查找逻辑：优先 exe，回退 Python + main.py）
-    let (program, args) = find_trainer_exe(&sidecar_path)
-        .or_else(|| {
-            sidecar_path.parent().and_then(|parent| {
-                let dist_path = parent.join("dist").join("nb-trainer");
-                find_trainer_exe(&dist_path)
-            })
-        })
+    // 查找 nb-trainer 可执行文件（优先 dist/ 下打包好的 exe，回退 Python + main.py）
+    let (program, args) = sidecar_path
+        .parent()
+        .map(|parent| parent.join("dist").join("nb-trainer"))
+        .as_ref()
+        .and_then(|dist_path| find_trainer_exe(dist_path))
+        .or_else(|| find_trainer_exe(&sidecar_path))
         .ok_or_else(|| "推理模块未正确安装。请重新安装应用。".to_string())?;
 
+    // 工作目录：优先 sidecar 源码目录，不存在时用 exe 所在目录
+    let work_dir = if sidecar_path.exists() {
+        sidecar_path.clone()
+    } else {
+        program.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| sidecar_path.clone())
+    };
+
     // 通过 stdin 传入配置（同训练方式），读取 stdout 结果
-    let mut child = Command::new(program)
-        .args(&args)
-        .current_dir(&sidecar_path)
+    let mut cmd = Command::new(program);
+    cmd.args(&args)
+        .current_dir(&work_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let mut child = cmd.spawn()
         .map_err(|e| format!("无法启动推理进程: {}", e))?;
 
     // 写入配置到 stdin

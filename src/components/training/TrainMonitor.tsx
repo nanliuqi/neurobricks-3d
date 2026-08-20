@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useTrainingStore } from '@/stores/useTrainingStore';
 import { stopSimulation, isSimulating } from './QuickTrain';
 import LossChart from './LossChart';
+import { writeChartMetricsNow } from '@/utils/chartSync';
 
 export default function TrainMonitor() {
   const isTraining = useTrainingStore(state => state.isTraining);
@@ -60,6 +61,18 @@ export default function TrainMonitor() {
   const handleGradientDiagnosis = async () => {
     setGradientMsg('梯度诊断功能尚未实现，将在后续版本中支持');
     setTimeout(() => setGradientMsg(null), 3000);
+  };
+
+  // 打开独立曲线窗口（独立系统窗口，可移出应用/缩放/关闭）
+  const handleOpenChart = async () => {
+    // 先强制写入最新曲线数据，确保窗口首次轮询即可读到并立即绘制（避免空白竞态）
+    writeChartMetricsNow();
+    try {
+      const { invoke } = await import('@tauri-apps/api/tauri');
+      await invoke('open_chart_window');
+    } catch (e) {
+      console.error('Failed to open chart window:', e);
+    }
   };
 
   return (
@@ -156,6 +169,24 @@ export default function TrainMonitor() {
       )}
 
       {/* Loss/Accuracy 曲线图 */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+        <span style={{ color: '#94a3b8', fontSize: '11px', fontWeight: 600 }}>训练曲线</span>
+        <button
+          onClick={handleOpenChart}
+          title="在独立窗口中查看训练曲线（可移出应用/缩放）"
+          style={{
+            padding: '2px 8px',
+            backgroundColor: '#1a3a5c',
+            color: '#93c5fd',
+            border: '1px solid #2a4a6c',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontSize: '10px',
+          }}
+        >
+          ⧉ 放大查看
+        </button>
+      </div>
       <div style={{ flex: 1, minHeight: '200px', marginBottom: '12px' }}>
         <LossChart />
       </div>

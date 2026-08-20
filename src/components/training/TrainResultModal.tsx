@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTrainingStore } from '@/stores/useTrainingStore';
 import { useLayerStore } from '@/stores/useLayerStore';
+import { writeChartMetricsNow } from '@/utils/chartSync';
 
 /**
  * 训练完成结果汇总模态卡片
@@ -66,9 +67,16 @@ export default function TrainResultModal() {
     resetTraining();
   };
 
-  const handleViewChart = () => {
-    // 关闭模态框但不重置，让用户看到训练监控面板的曲线
+  const handleViewChart = async () => {
+    // 关闭结果卡片并打开独立曲线窗口；先强制写入数据避免窗口空白
     setVisible(false);
+    writeChartMetricsNow();
+    try {
+      const { invoke } = await import('@tauri-apps/api/tauri');
+      await invoke('open_chart_window');
+    } catch (e) {
+      console.error('Failed to open chart window:', e);
+    }
   };
 
   return (

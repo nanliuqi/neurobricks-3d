@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>训练曲线</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    background: #0a1a33; overflow: hidden;
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+  }
+  #wrap { display: flex; flex-direction: column; width: 100vw; height: 100vh; }
+  #header {
+    flex-shrink: 0; display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 12px; background: #0f3460; user-select: none;
+  }
+  #header .title { color: #fff; font-size: 13px; font-weight: 600; }
+  #header .hint { color: #64748b; font-size: 10px; }
+  #body { flex: 1; min-height: 0; padding: 8px; }
+  canvas { width: 100%; height: 100%; border-radius: 4px; display: block; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="header">
+    <span class="title">📈 训练曲线</span>
+    <span class="hint" id="status">正在连接数据…</span>
+  </div>
+  <div id="body"><canvas id="chart"></canvas></div>
+</div>
+<script>
+(function () {
+  var metrics = [];
+  var canvas = document.getElementById('chart');
+  var body = document.getElementById('body');
+
+  // 绘制函数（与主应用 LossChart 逻辑一致）
+  function drawChart(data) {
+    var dpr = window.devicePixelRatio || 1;
+    var rect = body.getBoundingClientRect();
+    var w = Math.floor(rect.width - 16);   // 减去 body 的 padding
+    var h = Math.floor(rect.height - 16);
+    if (w <= 0 || h <= 0) return;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+
+    var ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(dpr, dpr);
+
+    ctx.fillStyle = '#0f3460';
+    ctx.fillRect(0, 0, w, h);
+
+    if (!data || data.length < 2) {
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('等待训练数据...', w / 2, h / 2);
+      return;
+    }
+
+    var padding = { top: 20, right: 50, bottom: 30, left: 50 };
+    var plotWidth = w - padding.left - padding.right;
+    var plotHeight = h - padding.top - padding.bottom;
+
+    var losses = data.map(function (m) { return m.loss; });
+    var maxLoss = Math.max.apply(null, losses.concat([0.1]));
+    var minLoss = 0;
+
+    // 网格线
+    ctx.strokeStyle = '#1a3a5c';
+    ctx.lineWidth = 0.5;
+    for (var i = 0; i <= 4; i++) {
+      var gy = padding.top + (plotHeight / 4) * i;
+      ctx.beginPath();
+      ctx.moveTo(padding.left, gy);
+      ctx.lineTo(w - padding.right, gy);
+      ctx.stroke();
+    }
+
+    function toX(idx) { return padding.left + (idx / (data.length - 1)) * plotWidth; }
+    function toYLoss(loss) { return padding.top + (1 - (loss - minLoss) / (maxLoss - minLoss)) * plotHeight; }
+    function toYAcc(acc) { return padding.top + (1 - acc) * plotHeight; }
+
+    // Loss 曲线
+    ctx.strokeStyle = '#3b82f6';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    data.forEach(function (m, idx) {
+      var x = toX(idx), y = toYLoss(m.loss);
+      if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    // Accuracy 曲线
+    ctx.strokeStyle = '#f59e0b';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    data.forEach(function (m, idx) {
+      var x = toX(idx), y = toYAcc(m.accuracy);
+      if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    // epoch 边界虚线
+    var boundaries = [];
+    for (var j = 1; j < data.length; j++) {
+      if (data[j].epoch !== data[j - 1].epoch) {
+        boundaries.push({ x: toX(j), epoch: data[j].epoch });
+      }
+    }
+    if (boundaries.length > 0) {
+      ctx.strokeStyle = 'rgba(100, 116, 139, 0.3)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      boundaries.forEach(function (b) {
+        ctx.beginPath();
+        ctx.moveTo(b.x, padding.top);
+        ctx.lineTo(b.x, h - padding.bottom);
+        ctx.stroke();
+      });
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#64748b';
+      ctx.font = '10px monospace';
+      ctx.textAlign = 'center';
+      boundaries.forEach(function (b) {
+        ctx.fillText('E' + b.epoch, b.x, padding.top - 4);
+      });
+    }
+
+    // 图例
+    ctx.font = '10px sans-serif';
+    ctx.fillStyle = '#3b82f6';
+    ctx.fillRect(w - padding.right + 8, padding.top, 8, 8);
+    ctx.fillStyle = '#94a3b8';
+    ctx.textAlign = 'left';
+    ctx.fillText('Loss', w - padding.right + 20, padding.top + 8);
+    ctx.fillStyle = '#f59e0b';
+    ctx.fillRect(w - padding.right + 8, padding.top + 16, 8, 8);
+    ctx.fillStyle = '#94a3b8';
+    ctx.fillText('Acc', w - padding.right + 20, padding.top + 24);
+
+    // Y 轴标签
+    ctx.fillStyle = '#64748b';
+    ctx.textAlign = 'right';
+    ctx.fillText(maxLoss.toFixed(2), padding.left - 5, padding.top + 4);
+    ctx.fillText('0', padding.left - 5, padding.top + plotHeight + 4);
+
+    // 最新值标注
+    var latest = data[data.length - 1];
+    ctx.fillStyle = '#3b82f6';
+    ctx.textAlign = 'left';
+    ctx.fillText(latest.loss.toFixed(4), w - padding.right + 5, toYLoss(latest.loss) + 3);
+    ctx.fillStyle = '#f59e0b';
+    ctx.fillText((latest.accuracy * 100).toFixed(1) + '%', w - padding.right + 5, toYAcc(latest.accuracy) + 3);
+  }
+
+  // 窗口尺寸变化时重绘
+  window.addEventListener('resize', function () { drawChart(metrics); });
+
+  // 从 localStorage 读取主窗口写入的曲线数据（同源窗口共享，每 500ms 轮询一次）
+  var CHART_KEY = 'nb_chart_metrics';
+  var statusEl = document.getElementById('status');
+  var lastRaw = '';
+  function updateStatus(count, updated) {
+    if (!statusEl) return;
+    if (count > 0) {
+      statusEl.textContent = '数据点: ' + count + ' · 更新于 ' + updated + ' · Loss蓝/Acc橙';
+    } else {
+      statusEl.textContent = '等待训练数据（尚无数据写入）…';
+    }
+  }
+  function pollData() {
+    try {
+      var raw = localStorage.getItem(CHART_KEY);
+      if (raw && raw !== lastRaw) {
+        lastRaw = raw;
+        var parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          metrics = parsed;
+          drawChart(metrics);
+          var t = new Date();
+          var hh = ('0' + t.getHours()).slice(-2);
+          var mm = ('0' + t.getMinutes()).slice(-2);
+          var ss = ('0' + t.getSeconds()).slice(-2);
+          updateStatus(metrics.length, hh + ':' + mm + ':' + ss);
+        }
+      } else if (!raw) {
+        updateStatus(0, '');
+      }
+    } catch (e) {
+      // 忽略解析失败，等待下一次轮询
+    }
+  }
+  pollData();
+  setInterval(pollData, 500);
+
+  // 初始绘制（数据到达前显示占位）
+  drawChart(metrics);
+})();
+</script>
+</body>
+</html>

@@ -2135,6 +2135,7 @@ version = "0.1.0"
 dependencies = [
  "calamine",
  "csv",
+ "encoding_rs",
  "image 0.25.10",
  "serde",
  "serde_json",

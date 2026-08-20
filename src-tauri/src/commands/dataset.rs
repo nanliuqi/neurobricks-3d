@@ -139,27 +139,65 @@ pub fn import_csv(file_path: String) -> Result<DatasetInfo, String> {
         .and_then(|n| n.to_str())
         .unwrap_or("Unknown")
         .to_string();
-    
-    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
-    let mut reader = csv::Reader::from_reader(file);
-    
+
+    // 读取全部字节并自动识别编码：
+    // 中文 Windows 上 Excel 另存的 CSV 默认是 GBK/ANSI 编码，直接按 UTF-8 解析会失败，
+    // 因此先尝试 UTF-8（含 BOM），非法时回退 GB18030（GBK 超集）解码
+    let bytes = std::fs::read(path)
+        .map_err(|e| format!("无法读取文件: {}", e))?;
+    if bytes.is_empty() {
+        return Err("CSV 文件为空".to_string());
+    }
+
+    let content: String = if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        // UTF-8 BOM：跳过 BOM 后按 UTF-8 解码
+        String::from_utf8(bytes[3..].to_vec())
+            .map_err(|e| format!("UTF-8 解码失败: {}", e))?
+    } else {
+        match String::from_utf8(bytes.clone()) {
+            Ok(s) => s,
+            Err(_) => {
+                // 非合法 UTF-8 → 按 GB18030（兼容 GBK/GB2312）解码
+                let (decoded, _enc, had_errors) = encoding_rs::GB18030.decode(&bytes);
+                if had_errors {
+                    return Err("无法识别文件编码（既非 UTF-8 也非 GBK），请用 Excel 另存为 UTF-8 的 CSV 后重试".to_string());
+                }
+                decoded.into_owned()
+            }
+        }
+    };
+
+    let mut reader = csv::ReaderBuilder::new()
+        .has_headers(true)
+        .flexible(true)
+        .from_reader(content.as_bytes());
+
     // 获取列名
     let headers = reader.headers()
-        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("CSV 解析失败（表头）: {}", e))?
         .iter()
         .map(|h| h.to_string())
         .collect::<Vec<String>>();
-    
+
     let column_count = headers.len();
-    
-    // 读取数据行
+    if column_count < 2 {
+        return Err("CSV 至少需要 2 列（特征列 + 标签列）".to_string());
+    }
+
+    // 读取数据行：前 5 行预览 + 统计末列（标签列）唯一值数
     let mut preview_rows: Vec<serde_json::Value> = Vec::new();
     let mut total_count: u32 = 0;
-    
+    let mut label_set: std::collections::HashSet<String> = std::collections::HashSet::new();
+
     for result in reader.records() {
-        let record = result.map_err(|e| e.to_string())?;
+        let record = result.map_err(|e| format!("CSV 解析失败（第 {} 行）: {}", total_count + 2, e))?;
         total_count += 1;
-        
+
+        // 统计标签列（末列）唯一值
+        if let Some(label) = record.iter().last() {
+            label_set.insert(label.to_string());
+        }
+
         if preview_rows.len() < 5 {
             let mut row = serde_json::Map::new();
             for (i, field) in record.iter().enumerate() {
@@ -170,16 +208,13 @@ pub fn import_csv(file_path: String) -> Result<DatasetInfo, String> {
             preview_rows.push(serde_json::Value::Object(row));
         }
     }
-    
-    // 检测标签列：取最后一列
-    let _suggested_label = if column_count > 0 {
-        Some(headers[column_count - 1].clone())
-    } else {
-        None
-    };
 
-    let class_count = 10; // 简化，实际应统计标签列唯一值数
-    
+    if total_count == 0 {
+        return Err("CSV 没有数据行（仅有表头）".to_string());
+    }
+
+    let class_count = label_set.len().max(1) as u32;
+
     Ok(DatasetInfo {
         name,
         dataset_type: "csv".to_string(),

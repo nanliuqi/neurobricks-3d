@@ -31,3 +31,9 @@ src-tauri/target/
 
 # Cache
 *.log
+
+# Test reports (测试代理生成的报告/截图)
+测试报告/
+
+# 调试/验证用临时截图
+__verify-imgs/

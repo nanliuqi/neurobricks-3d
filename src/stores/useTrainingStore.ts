@@ -1,7 +1,9 @@
 import { create } from 'zustand';
 import type { TrainConfig, TrainMetric, TrainStatus, LogEntry, TrainRecord } from '@/types/training';
+import type { LayerType, LayerParams } from '@/types/layer';
 import { useLayerStore } from './useLayerStore';
 import { useDatasetStore } from './useDatasetStore';
+import { usePredictCardsStore, inferModelType } from './usePredictCardsStore';
 
 interface TrainingState {
   isTraining: boolean;
@@ -18,6 +20,10 @@ interface TrainingState {
   history: TrainRecord[];
   error: string | null;
   trainStartTime: number | null;
+  // 训练开始时的快照（用于完成后生成推理卡片，避免训练期间场景被修改导致不一致）
+  currentModelId: string | null;
+  currentLayersSnapshot: Array<{ type: LayerType; params: LayerParams }> | null;
+  currentInputShape: number[] | null;
 }
 
 interface TrainingActions {
@@ -47,6 +53,9 @@ export const useTrainingStore = create<TrainingState & TrainingActions>()((set) 
   history: [],
   error: null,
   trainStartTime: null,
+  currentModelId: null,
+  currentLayersSnapshot: null,
+  currentInputShape: null,
 
   // 开始训练
   startTraining: (config: TrainConfig) => {
@@ -64,6 +73,10 @@ export const useTrainingStore = create<TrainingState & TrainingActions>()((set) 
       metrics: [],
       logs: [],
       error: null,
+      // 快照 modelId / 层配置 / 输入形状，供完成后生成推理卡片
+      currentModelId: config.modelId ?? null,
+      currentLayersSnapshot: config.layers ? config.layers.map(l => ({ type: l.type, params: { ...l.params } })) : null,
+      currentInputShape: config.inputShape ? [...config.inputShape] : null,
     });
   },
 
@@ -87,7 +100,7 @@ export const useTrainingStore = create<TrainingState & TrainingActions>()((set) 
     });
   },
 
-  // 完成训练（保存历史记录）
+  // 完成训练（保存历史记录 + 生成推理卡片）
   finishTraining: (accuracy: number) => {
     set(state => {
       const layerStore = useLayerStore.getState();
@@ -107,9 +120,32 @@ export const useTrainingStore = create<TrainingState & TrainingActions>()((set) 
         duration,
         dataset: datasetStore.datasetInfo?.name ?? '',
         metrics: [...state.metrics],
+        modelId: state.currentModelId ?? undefined,
+        layers: state.currentLayersSnapshot ?? undefined,
+        inputShape: state.currentInputShape ?? undefined,
       };
 
       const history = [record, ...state.history].slice(0, 5);
+
+      // 生成推理卡片（仅在真实 Tauri 环境且存在 modelId + 层快照时，浏览器模拟训练无权重文件）
+      const isTauri = typeof window !== 'undefined' && typeof (window as any).__TAURI_IPC__ === 'function';
+      if (isTauri && state.currentModelId && state.currentLayersSnapshot && state.currentLayersSnapshot.length > 0) {
+        const layersSnap = state.currentLayersSnapshot;
+        const modelType = inferModelType(layersSnap);
+        const datasetName = datasetStore.datasetInfo?.name ?? '';
+        const cardName = datasetName ? `${modelType} · ${datasetName}` : modelType;
+        usePredictCardsStore.getState().addCard({
+          id: state.currentModelId,
+          name: cardName,
+          modelType,
+          layers: layersSnap,
+          inputShape: state.currentInputShape ?? [1, 28, 28],
+          finalAccuracy: accuracy,
+          dataset: datasetName,
+          epochs: state.totalEpochs,
+          timestamp: Date.now(),
+        });
+      }
 
       return {
         isTraining: false,
@@ -133,7 +169,7 @@ export const useTrainingStore = create<TrainingState & TrainingActions>()((set) 
     });
   },
 
-  // 重置训练状态
+  // 重置训练状态（保留 finalAccuracy：模型文件仍在磁盘上，推理功能仍可用）
   resetTraining: () => {
     set({
       isTraining: false,
@@ -144,7 +180,6 @@ export const useTrainingStore = create<TrainingState & TrainingActions>()((set) 
       currentStep: 0,
       currentLoss: 0,
       currentAccuracy: 0,
-      finalAccuracy: null,
       metrics: [],
       logs: [],
       error: null,

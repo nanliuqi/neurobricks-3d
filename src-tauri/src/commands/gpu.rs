@@ -1,6 +1,13 @@
 use serde::{Deserialize, Serialize};
-use std::process::Command;
-use sysinfo::System;
+use std::path::Path;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+/// Windows GUI 程序 spawn 控制台子进程时必须加此标志，否则会弹出黑色 cmd 窗口
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -16,29 +23,109 @@ pub struct GPUInfo {
     pub category: Option<String>,
 }
 
-#[tauri::command]
-pub fn detect_devices() -> Vec<GPUInfo> {
-    let mut devices: Vec<GPUInfo> = Vec::new();
+/// 带超时保护运行外部命令（超时强杀进程，返回 None）
+/// 避免 nvidia-smi 等外部进程挂起时阻塞应用
+fn run_with_timeout(program: &Path, args: &[&str], timeout: Duration) -> Option<std::process::Output> {
+    let mut cmd = Command::new(program);
+    cmd.args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let mut child = cmd.spawn().ok()?;
 
-    // 尝试通过 nvidia-smi 检测 NVIDIA GPU
-    if let Ok(nvidia_devices) = detect_nvidia_gpus() {
-        devices.extend(nvidia_devices);
+    let deadline = Instant::now() + timeout;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break, // 进程已退出，收集输出
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    eprintln!("[NeuroBricks] Command timed out after {:?}: {:?}", timeout, program);
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(_) => return None,
+        }
+    }
+    child.wait_with_output().ok()
+}
+
+/// 检测命令入口：异步执行，绝不阻塞 UI 主线程
+#[tauri::command]
+pub async fn detect_devices() -> Vec<GPUInfo> {
+    tauri::async_runtime::spawn_blocking(detect_devices_blocking)
+        .await
+        .unwrap_or_default()
+}
+
+/// 获取系统内存信息（直接调用 Windows API，绝不挂起）
+#[cfg(windows)]
+fn get_system_memory_mb() -> (u64, u64) {
+    #[repr(C)]
+    struct MEMORYSTATUSEX {
+        dw_length: u32,
+        dw_memory_load: u32,
+        ull_total_phys: u64,
+        ull_avail_phys: u64,
+        ull_total_page_file: u64,
+        ull_avail_page_file: u64,
+        ull_total_virtual: u64,
+        ull_avail_virtual: u64,
+        ull_avail_extended_virtual: u64,
     }
 
-    // 添加 CPU 信息
-    use sysinfo::SystemExt;
-    let mut sys = System::new_with_specifics(sysinfo::RefreshKind::everything());
-    sys.refresh_all();
+    extern "system" {
+        fn GlobalMemoryStatusEx(lp_buffer: *mut MEMORYSTATUSEX) -> i32;
+    }
 
-    let cpu_brand = std::env::consts::ARCH.to_string();
-    let cores = sys.cpus().len();
-    let total_ram_mb = sys.total_memory() / 1024 / 1024;
+    let mut status = MEMORYSTATUSEX {
+        dw_length: std::mem::size_of::<MEMORYSTATUSEX>() as u32,
+        dw_memory_load: 0,
+        ull_total_phys: 0,
+        ull_avail_phys: 0,
+        ull_total_page_file: 0,
+        ull_avail_page_file: 0,
+        ull_total_virtual: 0,
+        ull_avail_virtual: 0,
+        ull_avail_extended_virtual: 0,
+    };
+
+    unsafe {
+        if GlobalMemoryStatusEx(&mut status) != 0 {
+            let total_mb = status.ull_total_phys / 1024 / 1024;
+            let used_mb = (status.ull_total_phys - status.ull_avail_phys) / 1024 / 1024;
+            return (total_mb, used_mb);
+        }
+    }
+    (0, 0)
+}
+
+#[cfg(not(windows))]
+fn get_system_memory_mb() -> (u64, u64) {
+    (0, 0)
+}
+
+fn detect_devices_blocking() -> Vec<GPUInfo> {
+    let mut devices: Vec<GPUInfo> = Vec::new();
+
+    // 尝试通过 nvidia-smi 检测 NVIDIA GPU（带超时保护）
+    devices.extend(detect_nvidia_gpus());
+
+    // CPU 信息：使用纯 Rust std + Windows API，不依赖 sysinfo（后者在部分 Windows 机器上可能挂起）
+    let cores = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(0);
+    let cpu_arch = std::env::consts::ARCH;
+    let (total_ram_mb, used_ram_mb) = get_system_memory_mb();
 
     devices.push(GPUInfo {
         available: true,
-        device_name: format!("CPU · {}核 · {} · {}GB", cores, cpu_brand, total_ram_mb / 1024),
+        device_name: format!("CPU · {}核 · {} · {}GB", cores, cpu_arch, total_ram_mb / 1024),
         vram_total: total_ram_mb,
-        vram_used: sys.used_memory() / 1024 / 1024,
+        vram_used: used_ram_mb,
         cuda_version: String::new(),
         is_integrated: Some(false),
         category: Some("cpu".to_string()),
@@ -47,22 +134,26 @@ pub fn detect_devices() -> Vec<GPUInfo> {
     devices
 }
 
-fn detect_nvidia_gpus() -> Result<Vec<GPUInfo>, String> {
+fn detect_nvidia_gpus() -> Vec<GPUInfo> {
     // 检查 nvidia-smi 是否存在
-    let nvidia_smi = which::which("nvidia-smi")
-        .map_err(|_| "nvidia-smi not found".to_string())?;
+    let Ok(nvidia_smi) = which::which("nvidia-smi") else {
+        return Vec::new();
+    };
 
-    // 执行 nvidia-smi --query-gpu=name,memory.total,memory.used,driver_version --format=csv,noheader,nounits
-    let output = Command::new(nvidia_smi)
-        .args([
+    // 执行查询（5 秒超时保护）
+    let Some(output) = run_with_timeout(
+        &nvidia_smi,
+        &[
             "--query-gpu=name,memory.total,memory.used,driver_version",
             "--format=csv,noheader,nounits",
-        ])
-        .output()
-        .map_err(|e| format!("Failed to run nvidia-smi: {}", e))?;
+        ],
+        Duration::from_secs(5),
+    ) else {
+        return Vec::new();
+    };
 
     if !output.status.success() {
-        return Err("nvidia-smi command failed".to_string());
+        return Vec::new();
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -79,8 +170,8 @@ fn detect_nvidia_gpus() -> Result<Vec<GPUInfo>, String> {
         let vram_used = parts[2].parse::<u64>().unwrap_or(0);
         let driver_version = parts[3].to_string();
 
-        // 尝试获取 CUDA 版本
-        let cuda_version = get_cuda_version().unwrap_or_else(|| driver_version.clone());
+        // 尝试获取 CUDA 版本（复用同一个 nvidia-smi 路径，带超时）
+        let cuda_version = get_cuda_version(&nvidia_smi).unwrap_or(driver_version);
 
         devices.push(GPUInfo {
             available: true,
@@ -93,19 +184,12 @@ fn detect_nvidia_gpus() -> Result<Vec<GPUInfo>, String> {
         });
     }
 
-    if devices.is_empty() {
-        return Err("No NVIDIA GPU detected".to_string());
-    }
-
-    Ok(devices)
+    devices
 }
 
-fn get_cuda_version() -> Option<String> {
-    // 尝试从 nvidia-smi 输出中获取 CUDA 版本
-    let output = Command::new("nvidia-smi")
-        .output()
-        .ok()?;
-
+fn get_cuda_version(nvidia_smi: &Path) -> Option<String> {
+    // 从 nvidia-smi 完整输出中提取 CUDA Version（5 秒超时保护）
+    let output = run_with_timeout(nvidia_smi, &[], Duration::from_secs(5))?;
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     for line in stdout.lines() {
@@ -116,24 +200,6 @@ fn get_cuda_version() -> Option<String> {
                 let v = v.split_whitespace().next().unwrap_or(v);
                 if !v.is_empty() {
                     return Some(v.to_string());
-                }
-            }
-        }
-    }
-
-    // 备选：读 nvcc --version
-    let nvcc_output = Command::new("nvcc")
-        .arg("--version")
-        .output()
-        .ok()?;
-
-    let nvcc_stdout = String::from_utf8_lossy(&nvcc_output.stdout);
-    for line in nvcc_stdout.lines() {
-        if line.contains("release") {
-            if let Some(release) = line.split("release").nth(1) {
-                let version = release.trim().split(',').next().unwrap_or("").trim();
-                if !version.is_empty() {
-                    return Some(version.to_string());
                 }
             }
         }

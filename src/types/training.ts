@@ -37,6 +37,8 @@ export interface TrainConfig {
   trainRatio?: number;
   /** Input 层形状 [C, H, W]：Python 端 local_image 数据集据此 Resize / 灰度化，使数据与模型输入一致 */
   inputShape?: number[];
+  /** 模型唯一标识：Python 端据此另存权重到 ~/.neurobricks/models/<modelId>.pth，支持多模型卡片化推理 */
+  modelId?: string;
 }
 
 /**
@@ -178,4 +180,10 @@ export interface TrainRecord {
   dataset: string;
   /** 完整训练曲线数据 */
   metrics: TrainMetric[];
+  /** 模型唯一标识（对应权重文件 ~/.neurobricks/models/<modelId>.pth），用于卡片化推理 */
+  modelId?: string;
+  /** 训练时的网络层配置快照（推理时据此重建模型） */
+  layers?: Array<{ type: LayerType; params: LayerParams }>;
+  /** 训练时的输入形状 [C, H, W] */
+  inputShape?: number[];
 }

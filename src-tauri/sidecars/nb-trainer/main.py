@@ -45,4 +45,9 @@ def main():
         sys.exit(1)
 
 if __name__ == '__main__':
+    # PyInstaller 打包后必须调用 freeze_support()：
+    # Windows 上 DataLoader(num_workers>0) 以 spawn 方式重新执行本 exe（--multiprocessing-fork），
+    # 若无此调用，子进程会重跑 main() 并阻塞在 stdin 读取上，导致训练挂起无输出
+    import multiprocessing
+    multiprocessing.freeze_support()
     main()

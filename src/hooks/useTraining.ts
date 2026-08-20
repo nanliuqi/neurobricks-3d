@@ -22,23 +22,22 @@ export function useTraining() {
   const progress = totalEpochs > 0 ? (currentEpoch / totalEpochs) * 100 : 0;
 
   const train = useCallback(async (config: TrainConfig) => {
-    try {
-      // 更新前端 Store 状态
-      storeStartTraining(config);
+    // 更新前端 Store 状态
+    storeStartTraining(config);
 
-      try {
-        const { invoke } = await import('@tauri-apps/api/tauri');
-        await invoke('start_training', { config });
-      } catch {
-        // Tauri 后端不可用，前端状态已更新
+    try {
+      const { invoke } = await import('@tauri-apps/api/tauri');
+      await invoke('start_training', { config });
+    } catch (e) {
+      // 真实 Tauri 环境（存在 __TAURI_IPC__）：invoke 失败 = 训练后端启动失败，
+      // 必须把真实错误展示给用户，而不是静默等待 60 秒超时
+      if (typeof (window as any).__TAURI_IPC__ === 'function') {
+        const msg = e instanceof Error ? e.message : String(e);
+        useTrainingStore.getState().setError(`训练进程启动失败：${msg}`);
       }
-    } catch (error) {
-      console.error('Failed to start training:', error);
-      // 如果后端启动失败，重置前端状态
-      resetTraining();
-      throw error;
+      // 浏览器演示模式（无 Tauri 运行时）：静默降级到模拟训练
     }
-  }, [storeStartTraining, resetTraining]);
+  }, [storeStartTraining]);
 
   const stop = useCallback(async () => {
     try {
