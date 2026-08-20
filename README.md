@@ -9,8 +9,7 @@
 ![PyTorch](https://img.shields.io/badge/PyTorch-训练引擎-EE4C2C)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-<!-- 截图放入 docs/screenshots/ 后取消下面注释 -->
-<!-- ![主界面](docs/screenshots/main.png) -->
+![NeuroBricks 3D 主界面](docs/screenshots/training.png)
 
 ## ✨ 功能特性
 
@@ -71,11 +70,11 @@
 5. **模型推理** — 右侧"🔍 推理"面板，选择模型卡片 + 上传图片即可预测
 6. **导出成果** — 右侧"💾 导出"面板，导出代码或权重文件
 
-<!-- ## 📸 界面预览
-| 3D 搭建场景 | 训练监控与曲线窗口 | 模型推理 |
-|:---:|:---:|:---:|
-| ![scene](docs/screenshots/scene.png) | ![training](docs/screenshots/training.png) | ![predict](docs/screenshots/predict.png) |
--->
+## 📸 界面预览
+
+| 3D 搭建场景 | 模型推理 |
+|:---:|:---:|
+| ![scene](docs/screenshots/scene.png) | ![predict](docs/screenshots/predict.png) |
 
 ## 👨‍💻 开发环境
 
