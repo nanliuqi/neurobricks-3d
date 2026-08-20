@@ -56,8 +56,7 @@
 
 从 [Releases](https://github.com/nanliuqi/neurobricks-3d/releases) 页面下载最新安装包：
 
-- **NSIS 安装包**（推荐）：`NeuroBricks 3D_x.x.x_x64-setup.exe`
-- **MSI 安装包**：`NeuroBricks 3D_x.x.x_x64_en-US.msi`
+- **Windows 安装包**：`NeuroBricks 3D_x.x.x_x64-setup.exe`（双击安装，推荐）
 
 安装包已内置训练引擎与数据集，**无需安装 Python 或任何依赖**，装完即用。
 
