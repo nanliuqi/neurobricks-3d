@@ -8,12 +8,13 @@
 
 ## 评审与开发快速入口 / Review quick start
 
-> 本仓库当前源码是本次评审对象。截至 2026-10-25，GitHub Releases 只有 2026-08-20 的历史 Windows setup.exe 附件，尚未发布与当前源码对应的新便携 ZIP。旧安装程序不代表当前教学、课题与结果解读界面；不要用它替代本次源码验收。
+> 当前可体验版本：[Windows 完整便携候选版 v0.1.0-rc.20261025](https://github.com/nanliuqi/neurobricks-3d/releases/tag/v0.1.0-rc.20261025)，程序代码来自提交 `9736525`，内含 Python/CUDA 训练运行时。请下载两个应用分卷及工具 ZIP，按发布页说明还原。该版本尚待完整 GUI 与其他机器验收；历史 8 月安装程序继续保留。
 >
-> Review the current source for this submission. The existing August 20 installer is historical; no new portable ZIP matching this source has been published as of October 25, 2026.
+> Try the [Windows portable release candidate](https://github.com/nanliuqi/neurobricks-3d/releases/tag/v0.1.0-rc.20261025), built from `9736525` with its training runtime included. Download both application parts and the tools ZIP. This is a test candidate pending complete GUI and other-machine acceptance; the August installer remains historical.
 
 | 你想做什么 / Goal | 入口 / Start here |
 | --- | --- |
+| 直接下载 Windows 应用 | [完整便携候选版与下载说明](https://github.com/nanliuqi/neurobricks-3d/releases/tag/v0.1.0-rc.20261025) |
 | 从源码启动、区分界面演示与真实训练 | [开发与评审指南](docs/开发与评审指南.md) |
 | 了解第一次如何操作 | [快速上手与常见问题](docs/教学/01-快速上手与常见问题.md) |
 | 准备课堂或现场演示 | [课堂与提交演示脚本](docs/教学/02-课堂与提交演示脚本.md) |
@@ -73,9 +74,9 @@ The current product promise is **small datasets, one Windows machine / one consu
 
 ### Install
 
-For this submission, follow the [source development and review guide](docs/开发与评审指南.md). [Releases](https://github.com/nanliuqi/neurobricks-3d/releases) currently provides only the historical August 20, 2026 setup.exe; it is not the current source version. No matching new portable ZIP is linked here because one has not yet been published.
+Download the [Windows portable release candidate](https://github.com/nanliuqi/neurobricks-3d/releases/tag/v0.1.0-rc.20261025): both `.zip.001` / `.zip.002` parts and `00-Windows-Download-Tools.zip`. Extract the tools ZIP beside the parts, then run `Extract-and-Run.cmd`; it verifies and restores the complete application without overwriting an existing application directory. Reserve at least 15 GiB of free space. GitHub's automatic source archives are for development; see the [source development and review guide](docs/开发与评审指南.md).
 
-The portable distribution workflow is retained for future builds: extract the complete ZIP, then run `NeuroBricks 3D.exe`. Verified portable builds contain their own training runtime; source clones do not. Compatible NVIDIA drivers are needed for GPU training; select CPU explicitly when appropriate. If a selected CUDA device becomes unavailable, startup is rejected and asks for device reselection.
+After the first extraction, run `NeuroBricks-3D/NeuroBricks 3D.exe` directly. This candidate bundles its own training runtime, so users do not install Python; source clones do not include it. WebView2 Runtime is required. Compatible NVIDIA drivers are needed for GPU training; select CPU explicitly when appropriate. If a selected CUDA device becomes unavailable, startup is rejected and asks for device reselection. Build and runtime smoke checks passed; complete GUI and clean-machine acceptance remain pending.
 
 > System requirements: Windows 10/11 (64-bit)
 
@@ -149,9 +150,9 @@ Task gamification and SSH training remain backlog ideas, not current product com
 
 ### 安装
 
-本次请按[开发与评审指南](docs/开发与评审指南.md)从源码启动。[Releases](https://github.com/nanliuqi/neurobricks-3d/releases) 截至 2026-10-25 仅有 2026-08-20 的历史 Windows setup.exe，不能代替当前源码；当前没有与本次源码对应的新便携 ZIP 下载入口。
+可直接下载 [Windows 完整便携候选版](https://github.com/nanliuqi/neurobricks-3d/releases/tag/v0.1.0-rc.20261025)。保存两个应用分卷（`.zip.001`、`.zip.002`）及 `00-Windows-Download-Tools.zip` 到同一文件夹，把工具 ZIP 解压到分卷旁，双击 `Extract-and-Run.cmd`，按校验结果完成还原。请预留至少 15 GiB 空间；已有同名应用目录时会拒绝覆盖。GitHub 自动生成的源码 ZIP 不是应用；从源码运行请看[开发与评审指南](docs/开发与评审指南.md)。
 
-保留的便携分发流程用于后续构建：完整解压 ZIP，再运行 `NeuroBricks 3D.exe`。已验证便携构建包含独立训练运行时，最终用户无需安装 Python；源码克隆不含此运行时。GPU 训练需要兼容的 NVIDIA 驱动，也可明确选择 CPU；已选 CUDA 不可用时须重新选择设备，不会静默改用 CPU。
+首次还原后，直接运行 `NeuroBricks-3D/NeuroBricks 3D.exe`。本候选包包含独立 Python/CUDA 训练运行时，用户无需另装 Python；源码克隆不含运行时。系统需要 WebView2；GPU 训练还需兼容的 NVIDIA 驱动，也可明确选择 CPU。已选 CUDA 不可用时须重新选择设备，不会静默改用 CPU。本次构建及运行时冒烟检查通过，完整 GUI 和其他机器验收仍待执行；旧 Release 保留供历史参考。
 
 > 系统要求：Windows 10/11（64 位）
 
