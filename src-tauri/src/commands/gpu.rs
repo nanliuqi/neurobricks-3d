@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
 
 /// Windows GUI 程序 spawn 控制台子进程时必须加此标志，否则会弹出黑色 cmd 窗口
 #[cfg(windows)]
@@ -14,8 +14,8 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 pub struct GPUInfo {
     pub available: bool,
     pub device_name: String,
-    pub vram_total: u64,  // MB
-    pub vram_used: u64,   // MB
+    pub vram_total: u64, // MB
+    pub vram_used: u64,  // MB
     pub cuda_version: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_integrated: Option<bool>,
@@ -25,11 +25,13 @@ pub struct GPUInfo {
 
 /// 带超时保护运行外部命令（超时强杀进程，返回 None）
 /// 避免 nvidia-smi 等外部进程挂起时阻塞应用
-fn run_with_timeout(program: &Path, args: &[&str], timeout: Duration) -> Option<std::process::Output> {
+fn run_with_timeout(
+    program: &Path,
+    args: &[&str],
+    timeout: Duration,
+) -> Option<std::process::Output> {
     let mut cmd = Command::new(program);
-    cmd.args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    cmd.args(args).stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
     let mut child = cmd.spawn().ok()?;
@@ -40,7 +42,10 @@ fn run_with_timeout(program: &Path, args: &[&str], timeout: Duration) -> Option<
             Ok(Some(_)) => break, // 进程已退出，收集输出
             Ok(None) => {
                 if Instant::now() >= deadline {
-                    eprintln!("[NeuroBricks] Command timed out after {:?}: {:?}", timeout, program);
+                    eprintln!(
+                        "[NeuroBricks] Command timed out after {:?}: {:?}",
+                        timeout, program
+                    );
                     let _ = child.kill();
                     let _ = child.wait();
                     return None;
@@ -123,7 +128,12 @@ fn detect_devices_blocking() -> Vec<GPUInfo> {
 
     devices.push(GPUInfo {
         available: true,
-        device_name: format!("CPU · {}核 · {} · {}GB", cores, cpu_arch, total_ram_mb / 1024),
+        device_name: format!(
+            "CPU · {}核 · {} · {}GB",
+            cores,
+            cpu_arch,
+            total_ram_mb / 1024
+        ),
         vram_total: total_ram_mb,
         vram_used: used_ram_mb,
         cuda_version: String::new(),

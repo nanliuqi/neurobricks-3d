@@ -130,7 +130,7 @@ export interface LayerMeta {
   label: string;
   /** 图标标识（可用于 UI 显示） */
   icon: string;
-  /** 详细描述 */
+  /** 基础说明：简短一句，供层卡片与参数面板直接显示；易误解之处写在帮助面板 */
   description: string;
   /** 默认参数配置 */
   defaultParams: LayerParams;
@@ -226,7 +226,7 @@ export interface ValidationResult {
 
 /**
  * 层元信息列表
- * 包含 7 种层的完整元信息，用于 UI 显示和默认参数初始化
+ * 包含全部 12 种层的元信息，是界面显示与默认参数初始化的单一来源
  */
 export const LAYER_META_LIST: LayerMeta[] = [
   {
@@ -283,7 +283,7 @@ export const LAYER_META_LIST: LayerMeta[] = [
     type: 'Linear',
     label: '全连接层',
     icon: 'linear',
-    description: '全连接层，进行线性变换',
+    description: '全连接层，对输入做线性映射',
     defaultParams: {
       inFeatures: 128,
       outFeatures: 10,
@@ -304,7 +304,7 @@ export const LAYER_META_LIST: LayerMeta[] = [
     type: 'Sigmoid',
     label: 'Sigmoid 激活',
     icon: 'sigmoid',
-    description: 'Sigmoid 激活函数，输出 0-1 概率',
+    description: 'Sigmoid 激活，输出压缩到 0～1',
     defaultParams: {},
     color: '#EF5350',
     category: 'activation',
@@ -322,7 +322,7 @@ export const LAYER_META_LIST: LayerMeta[] = [
     type: 'BatchNorm2d',
     label: '批量归一化',
     icon: 'batchnorm',
-    description: '批量归一化，加速训练收敛',
+    description: '批量归一化，按通道归一化激活',
     defaultParams: {
       numFeatures: 32,
     },
@@ -333,7 +333,7 @@ export const LAYER_META_LIST: LayerMeta[] = [
     type: 'LayerNorm',
     label: '层归一化',
     icon: 'layernorm',
-    description: '层归一化，稳定深层网络训练',
+    description: '层归一化，对单样本特征归一化',
     defaultParams: {
       normalizedShape: 32,
     },
@@ -344,7 +344,7 @@ export const LAYER_META_LIST: LayerMeta[] = [
     type: 'Dropout',
     label: 'Dropout',
     icon: 'dropout',
-    description: '随机丢弃神经元，防止过拟合',
+    description: '随机失活神经元，有助于降低过拟合风险',
     defaultParams: {
       dropRate: 0.5,
     },
@@ -355,7 +355,7 @@ export const LAYER_META_LIST: LayerMeta[] = [
     type: 'Flatten',
     label: '展平层',
     icon: 'flatten',
-    description: '将多维张量展平为一维向量',
+    description: '将单个样本的张量展平为一维',
     defaultParams: {},
     color: '#FFF176',
     category: 'utility',

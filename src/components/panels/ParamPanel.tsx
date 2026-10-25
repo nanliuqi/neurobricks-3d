@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useLayerStore } from '@/stores/useLayerStore';
 import type { LayerType } from '@/types/layer';
 import { LAYER_META_LIST } from '@/types/layer';
+import { formatShape } from '@/utils/shapeInference';
 
 const PARAM_LABELS: Record<string, string> = {
   inChannels: 'inChannels (输入通道)',
@@ -258,14 +259,6 @@ export default function ParamPanel() {
     }
   };
 
-  // 格式化输出形状
-  const formatOutputShape = (shape: number[] | null) => {
-    if (!shape) return '未计算';
-    if (shape.length === 1) return `[${shape[0]}]`;
-    if (shape.length === 3) return `[${shape[2]}, ${shape[0]}, ${shape[1]}]`; // [H, W, C] -> [C, H, W]
-    return `[${shape.join(', ')}]`;
-  };
-
   return (
     <div style={{ padding: '12px' }}>
       {/* 面板标题 */}
@@ -297,7 +290,8 @@ export default function ParamPanel() {
         <div style={{ marginBottom: '8px' }}>
           <span style={{ color: '#94a3b8', fontSize: '11px' }}>输出形状：</span>
           <span style={{ color: 'white', fontSize: '12px', fontFamily: 'monospace' }}>
-            {formatOutputShape(layer.outputShape)}
+            {/* 展示顺序即 store 中的 [C, H, W]；缺失形状沿用 formatShape 的未知表示 */}
+            {formatShape(layer.outputShape)}
           </span>
         </div>
         <div style={{ marginBottom: '8px' }}>
@@ -337,6 +331,7 @@ export default function ParamPanel() {
       {/* 换位按钮 */}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
         <button
+          type="button"
           onClick={() => moveLayer(selectedId, layer.order - 1)}
           disabled={layer.order === 0}
           style={{
@@ -354,6 +349,7 @@ export default function ParamPanel() {
           ⇈ 上移
         </button>
         <button
+          type="button"
           onClick={() => moveLayer(selectedId, layer.order + 1)}
           disabled={layer.order === layerCount - 1}
           style={{
@@ -375,6 +371,7 @@ export default function ParamPanel() {
       {/* 切换选中层按钮 */}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
         <button
+          type="button"
           onClick={() => {
             const allLayers = useLayerStore.getState().layers;
             const above = allLayers.find(l => l.order === layer.order - 1);
@@ -396,6 +393,7 @@ export default function ParamPanel() {
           ↑ 上一层
         </button>
         <button
+          type="button"
           onClick={() => {
             const allLayers = useLayerStore.getState().layers;
             const below = allLayers.find(l => l.order === layer.order + 1);
@@ -420,6 +418,7 @@ export default function ParamPanel() {
 
       {/* 删除按钮 */}
       <button
+        type="button"
         onClick={() => removeLayer(selectedId)}
         style={{
           width: '100%',

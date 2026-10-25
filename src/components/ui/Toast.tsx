@@ -1,8 +1,9 @@
 import { create } from 'zustand';
+import { StatusToneIcon, type StatusTone } from './statusIcons';
 
-type ToastType = 'success' | 'error' | 'info' | 'warning';
+export type ToastType = 'success' | 'error' | 'info' | 'warning';
 
-interface ToastItem {
+export interface ToastItem {
   id: string;
   type: ToastType;
   message: string;
@@ -15,39 +16,57 @@ interface ToastState {
   removeToast: (id: string) => void;
 }
 
+const MAX_VISIBLE_TOASTS = 5;
+let fallbackId = 0;
+
+function nextToastId(): string {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    fallbackId += 1;
+    return `toast-${Date.now()}-${fallbackId}`;
+  }
+}
+
 export const useToastStore = create<ToastState>()((set) => ({
   toasts: [],
   addToast: (type, message, duration = 4000) => {
-    const id = crypto.randomUUID();
+    const id = nextToastId();
+    const normalizedDuration = Number.isFinite(duration) && duration > 0 ? duration : 4000;
     set(state => ({
-      toasts: [...state.toasts, { id, type, message, duration }],
+      // 突发错误只保留最近五条，避免通知层无限增长并遮住整个工作区。
+      toasts: [...state.toasts, { id, type, message, duration: normalizedDuration }]
+        .slice(-MAX_VISIBLE_TOASTS),
     }));
-    // 自动移除
     setTimeout(() => {
-      set(state => ({ toasts: state.toasts.filter(t => t.id !== id) }));
-    }, duration);
+      set(state => ({ toasts: state.toasts.filter(toastItem => toastItem.id !== id) }));
+    }, normalizedDuration);
   },
   removeToast: (id) => {
-    set(state => ({ toasts: state.toasts.filter(t => t.id !== id) }));
+    set(state => ({ toasts: state.toasts.filter(toastItem => toastItem.id !== id) }));
   },
 }));
 
-/** 快捷方法（可在任何地方调用，不需要 React 上下文） */
+/** 快捷方法（可在任何地方调用，不需要 React 上下文）。 */
 export const toast = {
-  success: (msg: string) => useToastStore.getState().addToast('success', msg),
-  error: (msg: string) => useToastStore.getState().addToast('error', msg, 6000),
-  info: (msg: string) => useToastStore.getState().addToast('info', msg),
-  warning: (msg: string) => useToastStore.getState().addToast('warning', msg, 5000),
+  success: (message: string) => useToastStore.getState().addToast('success', message),
+  error: (message: string) => useToastStore.getState().addToast('error', message, 6000),
+  info: (message: string) => useToastStore.getState().addToast('info', message),
+  warning: (message: string) => useToastStore.getState().addToast('warning', message, 5000),
 };
 
-const TOAST_STYLES: Record<ToastType, { bg: string; border: string; color: string; icon: string }> = {
-  success: { bg: 'rgba(16, 185, 129, 0.15)', border: '#10b981', color: '#6ee7b7', icon: '✓' },
-  error: { bg: 'rgba(239, 68, 68, 0.15)', border: '#ef4444', color: '#fca5a5', icon: '✗' },
-  info: { bg: 'rgba(59, 130, 246, 0.15)', border: '#3b82f6', color: '#93c5fd', icon: 'ℹ' },
-  warning: { bg: 'rgba(245, 158, 11, 0.15)', border: '#f59e0b', color: '#fcd34d', icon: '⚠' },
+const TOAST_TONES: Record<ToastType, StatusTone> = {
+  success: 'success',
+  error: 'danger',
+  info: 'info',
+  warning: 'warning',
 };
 
-/** Toast 容器组件，放在 App 根节点 */
+/**
+ * 全局通知容器。
+ * 错误使用 assertive alert，其余使用 polite status；关闭操作由真实按钮承担，
+ * 不再依赖“点击整张卡片”这种对键盘用户不可发现的交互。
+ */
 export function ToastContainer() {
   const toasts = useToastStore(state => state.toasts);
   const removeToast = useToastStore(state => state.removeToast);
@@ -55,43 +74,33 @@ export function ToastContainer() {
   if (toasts.length === 0) return null;
 
   return (
-    <div style={{
-      position: 'fixed',
-      top: '16px',
-      right: '16px',
-      zIndex: 9999,
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '8px',
-      maxWidth: '400px',
-    }}>
-      {toasts.map(t => {
-        const s = TOAST_STYLES[t.type];
+    <section className="nb-toast-region" aria-label="应用通知">
+      {toasts.map(toastItem => {
+        const tone = TOAST_TONES[toastItem.type];
+        const isError = toastItem.type === 'error';
         return (
           <div
-            key={t.id}
-            onClick={() => removeToast(t.id)}
-            style={{
-              backgroundColor: s.bg,
-              border: `1px solid ${s.border}`,
-              borderRadius: '8px',
-              padding: '12px 16px',
-              color: s.color,
-              fontSize: '13px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: '8px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-              backdropFilter: 'blur(8px)',
-              animation: 'toastSlideIn 0.2s ease-out',
-            }}
+            key={toastItem.id}
+            className={`nb-toast nb-toast--${tone}`}
+            role={isError ? 'alert' : 'status'}
+            aria-live={isError ? 'assertive' : 'polite'}
+            aria-atomic="true"
           >
-            <span style={{ fontWeight: 700, flexShrink: 0 }}>{s.icon}</span>
-            <span style={{ whiteSpace: 'pre-wrap', lineHeight: '1.5' }}>{t.message}</span>
+            <StatusToneIcon tone={tone} />
+            <p className="nb-toast__message">{toastItem.message}</p>
+            <button
+              type="button"
+              className="nb-toast__close"
+              aria-label={`关闭通知：${toastItem.message}`}
+              onClick={() => removeToast(toastItem.id)}
+            >
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" aria-hidden="true">
+                <path d="m5 5 6 6M11 5l-6 6" />
+              </svg>
+            </button>
           </div>
         );
       })}
-    </div>
+    </section>
   );
 }

@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import { usePredictCardsStore, type PredictCard } from '@/stores/usePredictCardsStore';
 import { getDatasetKind, getClassLabel } from '@/utils/classLabels';
+import { getErrorMessage } from '@/utils/errorMessage';
 
 interface PredictionResult {
   success: boolean;
+  value?: number;
   predictions?: Array<{ class: number; probability: number }>;
   topClass?: number;
   topProbability?: number;
@@ -24,6 +26,7 @@ export default function PredictPanel() {
 
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null);
   const [imagePath, setImagePath] = useState<string | null>(null);
+  const [featureInputs, setFeatureInputs] = useState<Record<string, string>>({});
   const [result, setResult] = useState<PredictionResult | null>(null);
   const [loading, setLoading] = useState(false);
   // 内联重命名状态：正在编辑的卡片 id 与当前输入值
@@ -31,6 +34,7 @@ export default function PredictPanel() {
   const [editingName, setEditingName] = useState('');
 
   const selectedCard: PredictCard | null = cards.find(c => c.id === selectedCardId) ?? null;
+  const isRegression = selectedCard?.taskType === 'tabular_regression';
   // 数据集类型（用于类别语义化：MNIST→数字，CIFAR-10→中文名称）
   const datasetKind = getDatasetKind(selectedCard?.dataset);
   const topLabel = result && result.success && result.topClass != null
@@ -38,8 +42,10 @@ export default function PredictPanel() {
     : null;
 
   const handleSelectCard = (id: string) => {
+    const card = cards.find(item => item.id === id);
     setSelectedCardId(id);
     setImagePath(null);
+    setFeatureInputs(Object.fromEntries((card?.featureColumns ?? []).map(column => [column, ''])));
     setResult(null);
   };
 
@@ -48,6 +54,7 @@ export default function PredictPanel() {
     if (selectedCardId === id) {
       setSelectedCardId(null);
       setImagePath(null);
+      setFeatureInputs({});
       setResult(null);
     }
   };
@@ -89,7 +96,7 @@ export default function PredictPanel() {
   };
 
   const handlePredict = async () => {
-    if (!imagePath || !selectedCard) return;
+    if (!selectedCard) return;
     setLoading(true);
     setResult(null);
 
@@ -100,17 +107,44 @@ export default function PredictPanel() {
       const modelPath = `~/.neurobricks/models/${selectedCard.id}.pth`;
       const layersConfig = selectedCard.layers.map(l => ({ type: l.type, params: l.params }));
 
-      const resultStr = await invoke<string>('predict_image', {
-        modelPath,
-        imagePath,
-        layers: layersConfig,
-        inputShape: selectedCard.inputShape,
-      });
+      let resultStr: string;
+      if (selectedCard.taskType === 'tabular_regression') {
+        if (!selectedCard.preprocessing || !selectedCard.featureColumns) {
+          throw new Error('该回归卡片缺少训练时预处理参数，请重新训练生成卡片');
+        }
+        const rawFeatureValues = selectedCard.featureColumns.map(column => featureInputs[column]?.trim() ?? '');
+        if (rawFeatureValues.some(value => value.length === 0)) {
+          throw new Error('请为每个特征填写有限数值');
+        }
+        const featureValues = rawFeatureValues.map(Number);
+        if (featureValues.some(value => !Number.isFinite(value))) {
+          throw new Error('请为每个特征填写有限数值');
+        }
+        resultStr = await invoke<string>('predict_tabular', {
+          modelPath,
+          featureValues,
+          layers: layersConfig,
+          inputShape: selectedCard.inputShape,
+          preprocessing: selectedCard.preprocessing,
+        });
+      } else {
+        if (!imagePath) throw new Error('请先选择要预测的图片');
+        if (!selectedCard.imagePreprocessing) {
+          throw new Error('该历史卡片缺少训练时图像预处理协议，不能安全猜测归一化参数；请重新训练生成卡片');
+        }
+        resultStr = await invoke<string>('predict_image', {
+          modelPath,
+          imagePath,
+          layers: layersConfig,
+          inputShape: selectedCard.inputShape,
+          preprocessing: selectedCard.imagePreprocessing,
+        });
+      }
 
       const parsed = JSON.parse(resultStr) as PredictionResult;
       setResult(parsed);
     } catch (error) {
-      setResult({ success: false, error: (error as Error).message });
+      setResult({ success: false, error: getErrorMessage(error, '推理后端未返回错误详情') });
     } finally {
       setLoading(false);
     }
@@ -206,7 +240,9 @@ export default function PredictPanel() {
                     )}
                     {/* 重命名按钮 */}
                     <button
+                      type="button"
                       onClick={(e) => { e.stopPropagation(); handleStartRename(card); }}
+                      aria-label={`重命名模型 ${card.name}`}
                       title="重命名此模型卡片"
                       style={{
                         background: 'none',
@@ -222,7 +258,9 @@ export default function PredictPanel() {
                     </button>
                     {/* 删除按钮 */}
                     <button
+                      type="button"
                       onClick={(e) => { e.stopPropagation(); handleDeleteCard(card.id); }}
+                      aria-label={`删除模型 ${card.name}`}
                       title="删除此模型卡片"
                       style={{
                         background: 'none',
@@ -237,9 +275,13 @@ export default function PredictPanel() {
                       ✕
                     </button>
                   </div>
-                  {/* 卡片元信息：准确率 / 轮数 / 训练时间 */}
+                  {/* 卡片元信息：任务指标 / 轮数 / 训练时间 */}
                   <div style={{ display: 'flex', gap: '10px', fontSize: '10px', color: '#94a3b8' }}>
-                    <span>准确率 <span style={{ color: '#6ee7b7', fontFamily: 'monospace' }}>{(card.finalAccuracy * 100).toFixed(1)}%</span></span>
+                    {card.taskType === 'tabular_regression' ? (
+                      <span>MAE <span style={{ color: '#6ee7b7', fontFamily: 'monospace' }}>{card.finalAccuracy.toFixed(4)}</span></span>
+                    ) : (
+                      <span>准确率 <span style={{ color: '#6ee7b7', fontFamily: 'monospace' }}>{(card.finalAccuracy * 100).toFixed(1)}%</span></span>
+                    )}
                     <span>{card.epochs} 轮</span>
                     <span style={{ fontFamily: 'monospace' }}>{formatTrainTime(card.timestamp)}</span>
                   </div>
@@ -276,45 +318,59 @@ export default function PredictPanel() {
             color: '#93c5fd',
             marginBottom: '12px',
           }}>
-            💡 当前模型：{selectedCard.name}，期望输入 [{selectedCard.inputShape.join(', ')}]，图片将自动 resize
+            💡 当前模型：{selectedCard.name}，期望输入 [{selectedCard.inputShape.join(', ')}]
+            {isRegression ? '；请按训练时的特征顺序填写原始数值，系统会复用训练集标准化参数' : '；图片将自动 resize'}
           </div>
 
-          {/* 选择图片 */}
-          <div style={{ marginBottom: '12px' }}>
-            <button
-              onClick={handleSelectImage}
-              style={{
-                width: '100%',
-                padding: '12px',
-                backgroundColor: '#1e40af',
-                color: 'white',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontSize: '13px',
-                fontWeight: 600,
-              }}
-            >
-              📷 选择图片
-            </button>
-            {imagePath && (
-              <div style={{
-                marginTop: '8px',
-                padding: '8px',
-                backgroundColor: '#0f3460',
-                borderRadius: '4px',
-                fontSize: '11px',
-                color: '#94a3b8',
-                wordBreak: 'break-all',
-              }}>
-                {imagePath}
-              </div>
-            )}
-          </div>
+          {isRegression ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
+              {selectedCard.featureColumns?.map(column => (
+                <label key={column} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <span style={{ color: '#94a3b8', fontSize: '11px' }}>{column}</span>
+                  <input
+                    type="number"
+                    step="any"
+                    value={featureInputs[column] ?? ''}
+                    onChange={event => {
+                      setFeatureInputs(current => ({ ...current, [column]: event.target.value }));
+                      setResult(null);
+                    }}
+                    placeholder="输入有限数值"
+                    style={{
+                      padding: '8px', backgroundColor: '#0a1a33', color: 'white',
+                      border: '1px solid #1a3a5c', borderRadius: '4px', fontFamily: 'monospace',
+                    }}
+                  />
+                </label>
+              ))}
+            </div>
+          ) : (
+            <div style={{ marginBottom: '12px' }}>
+              <button
+                type="button"
+                onClick={handleSelectImage}
+                style={{
+                  width: '100%', padding: '12px', backgroundColor: '#1e40af', color: 'white',
+                  border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: 600,
+                }}
+              >
+                📷 选择图片
+              </button>
+              {imagePath && (
+                <div style={{
+                  marginTop: '8px', padding: '8px', backgroundColor: '#0f3460', borderRadius: '4px',
+                  fontSize: '11px', color: '#94a3b8', wordBreak: 'break-all',
+                }}>
+                  {imagePath}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* 推理按钮 */}
-          {imagePath && (
+          {(isRegression || imagePath) && (
             <button
+              type="button"
               onClick={handlePredict}
               disabled={loading}
               style={{
@@ -330,7 +386,7 @@ export default function PredictPanel() {
                 marginBottom: '12px',
               }}
             >
-              {loading ? '⏳ 推理中...' : '🚀 开始预测'}
+              {loading ? '⏳ 推理中...' : isRegression ? '🚀 计算回归预测值' : '🚀 开始预测'}
             </button>
           )}
 
@@ -412,6 +468,18 @@ export default function PredictPanel() {
                   </div>
                   );
                 })}
+              </div>
+            </div>
+          )}
+
+          {result && result.success && isRegression && Number.isFinite(result.value) && (
+            <div style={{
+              padding: '16px', backgroundColor: 'rgba(16, 185, 129, 0.1)',
+              border: '1px solid #10b981', borderRadius: '6px', textAlign: 'center',
+            }}>
+              <div style={{ color: '#94a3b8', fontSize: '11px', marginBottom: '6px' }}>回归预测值</div>
+              <div style={{ color: '#10b981', fontSize: '28px', fontWeight: 700, fontFamily: 'monospace' }}>
+                {result.value!.toFixed(6)}
               </div>
             </div>
           )}

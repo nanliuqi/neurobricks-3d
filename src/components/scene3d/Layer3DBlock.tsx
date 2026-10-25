@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { useLayerStore } from '../../stores/useLayerStore';
 import type { Layer3D, LayerType } from '../../types/layer';
 import { BLOCK_HEIGHT, LAYER_META_LIST } from '../../types/layer';
+import { paramCountToBlockWidth } from '@/utils/parameterCountPresentation';
 
 interface Layer3DBlockProps {
   layer: Layer3D;
@@ -28,8 +29,10 @@ const Layer3DBlock = memo(function Layer3DBlock({ layer }: Layer3DBlockProps) {
     prevFlashTrigger.current = flashTrigger;
   }, [flashTrigger]);
 
-  // 参数量映射宽度（参数量越大积木越宽）
-  const width = Math.max(1, Math.log2(layer.paramCount + 1) * 0.3 + 1);
+  // 参数量映射宽度（参数量越大积木越宽）：不可用时退回有限正数的占位宽度，
+  // NaN / Infinity / 负数不会进入 RoundedBox 的几何参数；占位宽度落在合法映射的
+  // 取值间隙里，因此不会被看成「0 参数」的积木。
+  const width = paramCountToBlockWidth(layer.paramCount);
 
   // 计算积木深度（基于层类型）
   const depth = useMemo(() => {

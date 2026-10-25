@@ -16,14 +16,17 @@
 
 ### 1. 安装依赖
 
+使用 Node.js >=20（推荐 22/24；项目已在 24.16.0 验证）。完整环境和源码启动步骤见[开发与评审指南](docs/开发与评审指南.md)。
+
 ```bash
-npm install
+npm ci
 ```
 
-测试依赖已包含在 `package.json` 的 `devDependencies` 中：
+当前测试依赖已包含在 `package.json` 的 `devDependencies` 中：
 - Vitest - 单元测试框架
 - React Testing Library - 组件测试
-- Playwright - E2E 测试
+
+Playwright 规格文件仍保留在仓库中，但当前尚未安装 Playwright 依赖，也没有可执行的 E2E 脚本；不得把这些规格描述为已经运行的自动化门禁。
 
 ### 2. 运行所有测试
 
@@ -66,7 +69,7 @@ src/__tests__/
 |------|------|------|
 | 单元测试 | Vitest + Happy-DOM | 工具函数、Store、类型推断 |
 | 组件测试 | React Testing Library | UI 组件渲染和交互 |
-| E2E 测试 | Playwright | 浏览器端到端流程测试 |
+| E2E 测试规格（未接入门禁） | Playwright | 待安装依赖并在浏览器执行，不代表当前已通过 |
 
 ---
 
@@ -81,33 +84,33 @@ npm test
 # 一次性运行所有测试
 npm run test:run
 
-# 仅运行单元测试
-npm run test:unit
+# 运行 Rust 测试
+npm run test:rust
 
-# 仅运行组件测试
-npm run test:component
+# 运行训练 sidecar 的无 GPU 协议测试
+npm run test:python
 
-# 生成覆盖率报告
-npm run test:coverage
+# TypeScript 类型检查
+npm run typecheck
+
+# 完整源码健康门禁：前端测试 + Rust 测试 + Python sidecar 测试 + 生产构建
+npm run verify
 ```
+
+`test:python` 和 `verify` 调用 PATH 中的 `python`，不会读取仅供 Rust 训练器定位的 `NEUROBRICKS_PYTHON`。先安装 sidecar requirements，再确认所用解释器；也可在源码根目录显式运行：
+
+```powershell
+.\src-tauri\sidecars\nb-trainer\.venv\Scripts\python.exe -B -m unittest discover -s .\src-tauri\sidecars\nb-trainer\tests -p "test_*.py"
+# 若使用 npm run verify，在当前终端将该虚拟环境加入 PATH 后核对：
+$env:PATH = "$(Resolve-Path .\src-tauri\sidecars\nb-trainer\.venv\Scripts);$env:PATH"
+python --version
+```
+
+只通过前端测试不等于 Rust/Python 或干净机器验收通过；按实际执行的门禁分别记录结果。
 
 ### E2E 测试
 
-```bash
-# 运行所有 E2E 测试
-npm run test:e2e
-
-# UI 模式（可视化调试）
-npm run test:e2e:ui
-
-# 指定浏览器
-npx playwright test --project=chromium
-npx playwright test --project=firefox
-npx playwright test --project=webkit
-
-# 调试模式
-npx playwright test --debug
-```
+`src/__tests__/e2e/` 保存了浏览器端流程规格，但 Playwright 尚未成为当前安装依赖和发布门禁。完成依赖接入并在真实浏览器运行之前，这些文件只代表待执行规格，不代表已验证结果。
 
 ### 选择性运行测试
 
@@ -118,8 +121,8 @@ npx vitest run src/__tests__/unit/utils/shapeInference.test.ts
 # 运行匹配的测试
 npx vitest run -t "应该正确推断 Conv2D"
 
-# 只运行失败的测试
-npx vitest run --rerun
+# 按失败用例的描述重新运行（替换为输出中的真实用例名）
+npx vitest run -t "失败用例的描述"
 ```
 
 ---
@@ -158,28 +161,10 @@ describe('shapeInference', () => {
 
 ### 组件测试示例
 
-```typescript
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import ErrorPanel from '@/components/panels/ErrorPanel';
+参见可执行的 [ErrorPanel.test.tsx](src/__tests__/components/panels/ErrorPanel.test.tsx)。它用现有的 `render`、`screen`、`fireEvent` 构造交互，明确设置校验结果夹具，并在用例之间清理 store，避免依赖其他测试残留的状态。项目未安装 `@testing-library/user-event`，无需为运行该示例另加依赖。
 
-describe('ErrorPanel', () => {
-  it('应该显示错误列表', () => {
-    render(<ErrorPanel />);
-    
-    expect(screen.getByText('错误信息')).toBeInTheDocument();
-  });
-
-  it('应该响应用户交互', async () => {
-    const user = userEvent.setup();
-    render(<ErrorPanel />);
-    
-    const button = screen.getByRole('button');
-    await user.click(button);
-    
-    expect(screen.getByText('更新后的文本')).toBeInTheDocument();
-  });
-});
+```bash
+npx vitest run src/__tests__/components/panels/ErrorPanel.test.tsx
 ```
 
 ### E2E 测试示例
@@ -205,16 +190,7 @@ test('应该能够拖拽添加图层', async ({ page }) => {
 
 ## 测试覆盖率
 
-### 查看覆盖率报告
-
-```bash
-npm run test:coverage
-```
-
-报告会生成在 `coverage/` 目录：
-- `index.html` - HTML 格式报告（浏览器打开查看）
-- `coverage-final.json` - JSON 格式
-- `lcov.info` - LCOV 格式（CI 集成用）
+当前尚未接入覆盖率 provider，也没有 `test:coverage` 脚本。覆盖率目标是后续质量门禁，不应在接入前声称已有覆盖率报告。
 
 ### 覆盖率目标
 
@@ -225,90 +201,11 @@ npm run test:coverage
 | 函数覆盖率 | > 85% | - |
 | 行覆盖率 | > 80% | - |
 
-### 排除文件
-
-以下文件不参与覆盖率统计（在 `vitest.config.ts` 中配置）：
-- `node_modules/`
-- `src/__tests__/`
-- `**/*.d.ts`
-- `**/*.config.*`
-- `src-tauri/`
-
 ---
 
 ## CI/CD 集成
 
-### GitHub Actions 示例
-
-创建 `.github/workflows/test.yml`：
-
-```yaml
-name: Test
-
-on:
-  push:
-    branches: [main, develop]
-  pull_request:
-    branches: [main]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    
-    steps:
-      - uses: actions/checkout@v3
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: 18
-          cache: 'npm'
-      
-      - name: Install dependencies
-        run: npm ci
-      
-      - name: Run unit tests
-        run: npm run test:run
-      
-      - name: Run component tests
-        run: npm run test:component
-      
-      - name: Generate coverage report
-        run: npm run test:coverage
-      
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
-        with:
-          file: ./coverage/lcov.info
-          fail_ci_if_error: true
-  
-  e2e:
-    runs-on: ubuntu-latest
-    
-    steps:
-      - uses: actions/checkout@v3
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: 18
-      
-      - name: Install dependencies
-        run: npm ci
-      
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps
-      
-      - name: Run E2E tests
-        run: npm run test:e2e
-      
-      - name: Upload test results
-        if: failure()
-        uses: actions/upload-artifact@v3
-        with:
-          name: playwright-report
-          path: playwright-report/
-```
+仓库当前没有已启用的 CI 工作流。`npm run verify` 是本地唯一完整源码健康门禁；未来接入 CI 时应直接调用这一入口，避免本地和 CI 使用两套不同命令。
 
 ---
 

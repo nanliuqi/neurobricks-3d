@@ -1,11 +1,27 @@
 import torch.nn as nn
+from protocol import TrainerError
+
+
+SUPPORTED_LAYER_TYPES = (
+    'Input', 'Conv2D', 'MaxPool2D', 'AvgPool2D', 'Linear', 'ReLU',
+    'Sigmoid', 'Tanh', 'BatchNorm2d', 'LayerNorm', 'Dropout', 'Flatten',
+)
 
 def build_model(layers_config):
     """根据层配置列表构建 nn.Sequential 模型"""
     modules = []
     input_shape = None
     
-    for layer in layers_config:
+    if not isinstance(layers_config, list) or not layers_config:
+        raise TrainerError('MODEL_CONFIG_INVALID', '网络结构必须是非空层列表')
+
+    for layer_index, layer in enumerate(layers_config):
+        if not isinstance(layer, dict) or not isinstance(layer.get('type'), str):
+            raise TrainerError(
+                'MODEL_LAYER_INVALID',
+                f'第 {layer_index + 1} 层缺少有效 type',
+                {'layerIndex': layer_index, 'layerId': layer.get('id') if isinstance(layer, dict) else None, 'allowedTypes': list(SUPPORTED_LAYER_TYPES)},
+            )
         layer_type = layer['type']
         params = layer.get('params', {})
         
@@ -60,5 +76,16 @@ def build_model(layers_config):
             ))
         elif layer_type == 'Flatten':
             modules.append(nn.Flatten())
+        else:
+            raise TrainerError(
+                'MODEL_LAYER_UNSUPPORTED',
+                f'第 {layer_index + 1} 层类型“{layer_type}”不受支持',
+                {
+                    'layerIndex': layer_index,
+                    'layerId': layer.get('id'),
+                    'layerType': layer_type,
+                    'allowedTypes': list(SUPPORTED_LAYER_TYPES),
+                },
+            )
     
     return nn.Sequential(*modules), input_shape

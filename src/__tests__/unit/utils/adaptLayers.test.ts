@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { adaptLayersToInputShape, validateNetwork } from '@/utils/shapeInference';
+import { adaptLayersForCsvRegression, adaptLayersToInputShape, validateNetwork } from '@/utils/shapeInference';
 import { CLASSIC_MODELS } from '@/types/classicModels';
 import type { Layer3D } from '@/types/layer';
 
@@ -106,6 +106,17 @@ describe('adaptLayersToInputShape（数据集适配）', () => {
     expect(linears[2].params.inFeatures).toBe(128);
 
     expect(validateNetwork(adapted).errors).toHaveLength(0);
+  });
+
+  it('MLP 适配 CSV 回归：最后一个 Linear 自动改为单值输出', () => {
+    const layers = templateToLayers('mlp');
+    const adapted = adaptLayersForCsvRegression(layers, 16);
+    const linears = adapted.filter(layer => layer.type === 'Linear');
+
+    expect(linears[0].params.inFeatures).toBe(16);
+    expect(linears.at(-1)?.params.outFeatures).toBe(1);
+    expect(validateNetwork(adapted).errors).toHaveLength(0);
+    expect(layers.filter(layer => layer.type === 'Linear').at(-1)?.params.outFeatures).not.toBe(1);
   });
 });
 

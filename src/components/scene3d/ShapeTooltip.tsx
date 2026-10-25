@@ -1,5 +1,6 @@
 import { Html } from '@react-three/drei';
 import { Layer3D, LAYER_META_LIST } from '../../types/layer';
+import { PARAM_COUNT_UNAVAILABLE_TEXT, projectParamCount } from '@/utils/parameterCountPresentation';
 
 interface ShapeTooltipProps {
   layer: Layer3D;
@@ -57,7 +58,7 @@ export default function ShapeTooltip({ layer, visible }: ShapeTooltipProps) {
         {/* 参数量 */}
         <div style={{ marginBottom: layer.validationError ? '4px' : '0' }}>
           <span style={{ color: '#94a3b8' }}>参数量：</span>
-          <span>{layer.paramCount.toLocaleString()}</span>
+          <span>{projectParamCount(layer.paramCount) ?? PARAM_COUNT_UNAVAILABLE_TEXT}</span>
         </div>
 
         {/* 校验错误（如有） */}

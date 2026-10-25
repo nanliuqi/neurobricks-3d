@@ -1,10 +1,14 @@
 import { useEffect } from 'react';
 import MainLayout from './components/layout/MainLayout';
 import { ToastContainer } from './components/ui/Toast';
+import UpdateNotice from './components/ui/UpdateNotice';
 import { useUpdateChecker } from './hooks/useUpdateChecker';
-import { useTrainingStore } from './stores/useTrainingStore';
 import { useLayerStore } from './stores/useLayerStore';
 import { writeChartMetricsNow } from './utils/chartSync';
+import {
+  ensureTrainingEventBridge,
+  subscribeTrainingRuntimeEvents,
+} from './trainingRuntime';
 
 const AUTOSAVE_KEY = 'neurobricks_autosave';
 
@@ -25,8 +29,16 @@ function isMainWindow(): boolean {
   return true;
 }
 
+async function installAvailableUpdate(): Promise<void> {
+  const { installUpdate } = await import('@tauri-apps/api/updater');
+  await installUpdate();
+  const { relaunch } = await import('@tauri-apps/api/process');
+  await relaunch();
+}
+
 export default function App() {
-  const layers = useLayerStore(state => state.layers);
+  // 根组件只关心“是否为空”；订阅完整 layers 会让每次调参都重渲染整个应用外壳。
+  const layerCount = useLayerStore(state => state.layers.length);
   const updateInfo = useUpdateChecker();
 
   // 自动保存：每 30 秒将网络结构序列化到 localStorage
@@ -93,33 +105,16 @@ export default function App() {
 
   // 网络清空时清除自动保存数据
   useEffect(() => {
-    if (layers.length === 0) {
+    if (layerCount === 0) {
       try {
         localStorage.removeItem(AUTOSAVE_KEY);
       } catch {}
     }
-  }, [layers.length]);
+  }, [layerCount]);
 
-  // Tauri 训练事件监听 + 心跳超时保护
+  // 训练事件由 trainingRuntime 的进程级单例桥接；这里仅订阅已处理的事件来同步曲线。
+  // 进程活性由 Rust 看门狗统一裁决，前端不维护第二套超时钟。
   useEffect(() => {
-    let unlisteners: (() => void)[] = [];
-    let lastProgressTime = Date.now();
-
-    // 训练开始时重置心跳时间戳（避免应用启动后等待超过60秒再开始训练时立即触发超时）
-    const unsubTrainingStart = useTrainingStore.subscribe((state, prevState) => {
-      if (state.isTraining && !prevState.isTraining) {
-        lastProgressTime = Date.now();
-      }
-    });
-
-    // 心跳检测：每 15 秒检查一次，60 秒无任何进度更新则判定超时
-    const heartbeatTimer = setInterval(() => {
-      const store = useTrainingStore.getState();
-      if (store.isTraining && Date.now() - lastProgressTime > 60000) {
-        store.setError('训练超时：60 秒内无进度更新，训练进程可能已停止响应');
-      }
-    }, 15000);
-
     // 独立曲线窗口数据同步：将曲线数据写入 localStorage（同源窗口共享），
     // chart.html 每 500ms 轮询读取。节流 600ms，避免频繁序列化大数组
     let lastChartSync = 0;
@@ -130,70 +125,17 @@ export default function App() {
       writeChartMetricsNow();
     };
 
-    (async () => {
-      try {
-        const { listen } = await import('@tauri-apps/api/event');
-
-        unlisteners.push(await listen('training-progress', (event) => {
-          const data = event.payload as any;
-          const store = useTrainingStore.getState();
-
-          // 更新心跳时间戳
-          lastProgressTime = Date.now();
-
-          if (data.type === 'progress') {
-            store.updateProgress({
-              epoch: data.epoch ?? 0,
-              step: data.step ?? 0,
-              loss: data.loss ?? 0,
-              accuracy: data.accuracy ?? 0,
-              timestamp: Date.now(),
-            });
-            syncChartMetrics();
-          } else if (data.type === 'epoch_end') {
-            store.updateProgress({
-              epoch: data.epoch ?? 0,
-              step: 0,
-              loss: data.trainLoss ?? data.train_loss ?? 0,
-              accuracy: data.valAccuracy ?? data.val_accuracy ?? 0,
-              timestamp: Date.now(),
-            });
-            syncChartMetrics();
-          } else if (data.type === 'done') {
-            // 仅在训练进行中时处理，避免与 training-done 事件重复调用
-            if (store.isTraining) {
-              store.finishTraining(data.finalAccuracy ?? data.final_accuracy ?? 0);
-            }
-            // 训练结束强制同步一次，确保曲线窗口展示完整数据
-            syncChartMetrics(true);
-          } else if (data.type === 'log') {
-            const level = data.level === 'warning' ? 'warn' : data.level || 'info';
-            store.addLog(level, data.message ?? '');
-          }
-        }));
-
-        unlisteners.push(await listen('training-done', () => {
-          const store = useTrainingStore.getState();
-          // 仅在训练进行中时处理（“done”消息已处理过时不再重复调用）
-          if (store.isTraining) {
-            store.finishTraining(store.currentAccuracy ?? 0);
-          }
-        }));
-
-        unlisteners.push(await listen('training-error', (event) => {
-          const data = event.payload as any;
-          const store = useTrainingStore.getState();
-          store.setError(data.message ?? '训练出错');
-        }));
-      } catch {
-        // 非 Tauri 环境，忽略
-      }
-    })();
+    const unsubscribe = subscribeTrainingRuntimeEvents(result => {
+      if (result === 'metric') syncChartMetrics();
+      if (result === 'done') syncChartMetrics(true);
+    });
+    void ensureTrainingEventBridge().catch(error => {
+      // 启动训练时会再次尝试，并把失败作为 startup 错误展示给用户。
+      console.error('Failed to prepare training event bridge:', error);
+    });
 
     return () => {
-      unlisteners.forEach((unlisten) => unlisten());
-      clearInterval(heartbeatTimer);
-      unsubTrainingStart();
+      unsubscribe();
     };
   }, []);
 
@@ -202,49 +144,7 @@ export default function App() {
       <MainLayout />
       <ToastContainer />
       {updateInfo.available && (
-        <div style={{
-          position: 'fixed',
-          bottom: '16px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: 9998,
-          backgroundColor: '#1e293b',
-          border: '1px solid #3b82f6',
-          borderRadius: '8px',
-          padding: '12px 20px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px',
-          boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-        }}>
-          <span style={{ color: '#93c5fd', fontSize: '13px' }}>
-            发现新版本 v{updateInfo.version}，建议更新
-          </span>
-          <button
-            onClick={async () => {
-              try {
-                const { installUpdate } = await import('@tauri-apps/api/updater');
-                await installUpdate();
-                const { relaunch } = await import('@tauri-apps/api/process');
-                await relaunch();
-              } catch (e) {
-                console.error('Update failed:', e);
-              }
-            }}
-            style={{
-              padding: '6px 16px',
-              backgroundColor: '#3b82f6',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontSize: '12px',
-              fontWeight: 600,
-            }}
-          >
-            立即更新
-          </button>
-        </div>
+        <UpdateNotice version={updateInfo.version} onInstall={installAvailableUpdate} />
       )}
     </>
   );

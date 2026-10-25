@@ -1,11 +1,14 @@
 # 数据集文件（太大不上传 git）
-data/
+data/*
+!data/README.md
 
 # PyInstaller 构建产物
 build/
 dist/
 __pycache__/
 *.spec
+!nb-trainer.spec
 
 # 打包用虚拟环境
 .venv/
+.venv-package-*/

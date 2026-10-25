@@ -1,20 +1,32 @@
 import { useLayerStore } from '../../stores/useLayerStore';
+import { useDatasetStore } from '../../stores/useDatasetStore';
 import type { ShapeValidationError } from '../../types/layer';
+import { datasetOutputContractErrors } from '../../utils/trainingPreflight';
 
 const ErrorPanel = () => {
   const validationResult = useLayerStore(state => state.validationResult);
+  const layers = useLayerStore(state => state.layers);
   const setSelectedId = useLayerStore(state => state.setSelectedId);
+  const datasetInfo = useDatasetStore(state => state.datasetInfo);
 
-  const errorCount = validationResult.errors.length;
+  const errors = [
+    ...validationResult.errors,
+    ...datasetOutputContractErrors(layers, datasetInfo),
+  ];
+
+  const errorCount = errors.length;
   const warningCount = validationResult.warnings?.length || 0;
 
   return (
-    <div style={{
-      maxHeight: '180px',
-      display: 'flex',
-      flexDirection: 'column',
-      borderBottom: '1px solid #0f3460',
-    }}>
+    <div
+      data-testid="validation-result"
+      style={{
+        maxHeight: '180px',
+        display: 'flex',
+        flexDirection: 'column',
+        borderBottom: '1px solid #0f3460',
+      }}
+    >
       {/* 标题 */}
       <div style={{
         padding: '8px 12px',
@@ -76,7 +88,7 @@ const ErrorPanel = () => {
         ))}
 
         {/* 错误 - 形状对比模式 */}
-        {validationResult.errors.map((error: ShapeValidationError, index: number) => {
+        {errors.map((error: ShapeValidationError, index: number) => {
           const hasShapeCompare = error.expectedInputShape && error.actualInputShape;
 
           return (

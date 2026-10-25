@@ -1,10 +1,20 @@
 ﻿import { useLayerStore } from '../../stores/useLayerStore';
 import { LAYER_META_LIST } from '../../types/layer';
+import { formatShape } from '@/utils/shapeInference';
+import { projectTotalParamCount } from '@/utils/parameterCountPresentation';
 import { toast } from '@/components/ui/Toast';
 
 // Tauri API 动态导入（不使用 isTauri 守卫，直接 try/catch）
 
-export default function SceneStats() {
+interface SceneStatsProps {
+  /**
+   * 是否显示「网络形状」摘要。默认 true 保持单独使用本组件时的原行为；
+   * 参数面板同时挂载逐层结构清单时由宿主关闭，避免两份重复摘要。
+   */
+  showNetworkShapeSummary?: boolean;
+}
+
+export default function SceneStats({ showNetworkShapeSummary = true }: SceneStatsProps) {
   const layers = useLayerStore(state => state.layers);
   const layoutMode = useLayerStore(state => state.layoutMode);
   const totalParams = useLayerStore(state => state.totalParams);
@@ -13,6 +23,9 @@ export default function SceneStats() {
 
   // 按 order 排序层
   const sortedLayers = [...layers].sort((a, b) => a.order - b.order);
+
+  // 总量只做展示投影：任何一层的记录不达标都不冒充「完整总量」，也不改写 store 数字
+  const totalParamCount = projectTotalParamCount({ totalParams, layers });
 
   // 保存项目
   const handleSave = async () => {
@@ -76,14 +89,6 @@ export default function SceneStats() {
     }
   };
 
-  // 格式化输出形状
-  const formatOutputShape = (shape: number[] | null | undefined): string => {
-    if (!shape || shape.length === 0) {
-      return '?';
-    }
-    return `[${shape.join(', ')}]`;
-  };
-
   // 获取层类型标签
   const getLayerLabel = (type: string): string => {
     const meta = LAYER_META_LIST.find(m => m.type === type);
@@ -114,7 +119,10 @@ export default function SceneStats() {
         </div>
         <div style={{ marginBottom: '8px' }}>
           <span style={{ color: '#94a3b8', fontSize: '12px' }}>总参数量：</span>
-          <span style={{ color: 'white', fontSize: '13px', fontWeight: 600 }}>{totalParams.toLocaleString()}</span>
+          <span
+            style={{ color: 'white', fontSize: '13px', fontWeight: 600 }}
+            title={totalParamCount.kind === 'unavailable' ? totalParamCount.hint : undefined}
+          >{totalParamCount.text}</span>
         </div>
         <div style={{ marginBottom: '8px' }}>
           <span style={{ color: '#94a3b8', fontSize: '12px' }}>网络状态：</span>
@@ -130,37 +138,39 @@ export default function SceneStats() {
         </div>
       </div>
 
-      {/* 网络形状摘要 */}
-      <div style={{ marginBottom: '16px' }}>
-        <div style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '8px', fontWeight: 600 }}>
-          网络形状
+      {/* 网络形状摘要：参数面板挂载逐层结构清单时由宿主关闭，避免两份重复摘要 */}
+      {showNetworkShapeSummary && (
+        <div style={{ marginBottom: '16px' }}>
+          <div style={{ color: '#94a3b8', fontSize: '12px', marginBottom: '8px', fontWeight: 600 }}>
+            网络形状
+          </div>
+          <div
+            style={{
+              backgroundColor: '#0f3460',
+              borderRadius: '6px',
+              padding: '10px',
+              fontSize: '11px',
+              fontFamily: 'monospace',
+              lineHeight: '1.8',
+            }}
+          >
+            {sortedLayers.length === 0 ? (
+              <div style={{ color: '#64748b', textAlign: 'center' }}>暂无层</div>
+            ) : (
+              sortedLayers.map((layer, index) => (
+                <div key={layer.id}>
+                  <span style={{ color: '#60a5fa' }}>{getLayerLabel(layer.type)}</span>
+                  <span style={{ color: '#94a3b8' }}> → </span>
+                  <span style={{ color: 'white' }}>{formatShape(layer.outputShape)}</span>
+                  {index < sortedLayers.length - 1 && (
+                    <div style={{ color: '#475569', textAlign: 'center', margin: '2px 0' }}>↓</div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
         </div>
-        <div
-          style={{
-            backgroundColor: '#0f3460',
-            borderRadius: '6px',
-            padding: '10px',
-            fontSize: '11px',
-            fontFamily: 'monospace',
-            lineHeight: '1.8',
-          }}
-        >
-          {sortedLayers.length === 0 ? (
-            <div style={{ color: '#64748b', textAlign: 'center' }}>暂无层</div>
-          ) : (
-            sortedLayers.map((layer, index) => (
-              <div key={layer.id}>
-                <span style={{ color: '#60a5fa' }}>{getLayerLabel(layer.type)}</span>
-                <span style={{ color: '#94a3b8' }}> → </span>
-                <span style={{ color: 'white' }}>{formatOutputShape(layer.outputShape)}</span>
-                {index < sortedLayers.length - 1 && (
-                  <div style={{ color: '#475569', textAlign: 'center', margin: '2px 0' }}>↓</div>
-                )}
-              </div>
-            ))
-          )}
-        </div>
-      </div>
+      )}
 
       {/* 布局模式切换 */}
       <div style={{ marginBottom: '16px' }}>
@@ -169,6 +179,7 @@ export default function SceneStats() {
         </div>
         <div style={{ display: 'flex', gap: '8px' }}>
           <button
+            type="button"
             onClick={() => setLayoutMode('vertical')}
             style={{
               flex: 1,
@@ -186,6 +197,7 @@ export default function SceneStats() {
             垂直模式
           </button>
           <button
+            type="button"
             onClick={() => setLayoutMode('free')}
             style={{
               flex: 1,
@@ -208,6 +220,7 @@ export default function SceneStats() {
       {/* 保存/加载按钮 */}
       <div style={{ display: 'flex', gap: '8px' }}>
         <button
+          type="button"
           onClick={handleSave}
           disabled={layers.length === 0}
           style={{
@@ -232,6 +245,7 @@ export default function SceneStats() {
           💾 保存
         </button>
         <button
+          type="button"
           onClick={handleLoad}
           style={{
             flex: 1,

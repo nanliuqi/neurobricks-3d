@@ -2,10 +2,11 @@ import { useState } from 'react';
 import { DndContext, type DragEndEvent } from '@dnd-kit/core';
 import LayerCard from './LayerCard';
 import { LAYER_META_LIST, type LayerMeta, type LayerType } from '@/types/layer';
-import { CLASSIC_MODELS } from '@/types/classicModels';
+import { CLASSIC_MODELS, type ClassicModel } from '@/types/classicModels';
 import { useLayerStore } from '@/stores/useLayerStore';
 import { useDatasetStore } from '@/stores/useDatasetStore';
-import { adaptLayersToInputShape } from '@/utils/shapeInference';
+import { adaptLayersForCsvRegression, adaptLayersToInputShape } from '@/utils/shapeInference';
+import { deriveCsvFeatureFields } from '@/utils/datasetContract';
 import { BLOCK_STEP, BLOCK_HEIGHT } from '@/types/layer';
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -19,12 +20,25 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 const CATEGORY_ORDER = ['conv', 'pool', 'activation', 'norm', 'linear', 'utility'];
 
+/**
+ * 经典模型列表只在 LayerLibrary（左栏唯一实例）内渲染一次，
+ * 用固定 ID 让 aria-controls 指向真实的展开目标，不引入动态 ID。
+ */
+const CLASSIC_MODELS_LIST_ID = 'layer-library-classic-models';
+
+/** 同上：层列表容器由「层组件库」总标题控制展开。 */
+const LAYER_LIST_ID = 'layer-library-layer-list';
+
 export default function LayerLibrary() {
   const [collapsed, setCollapsed] = useState(false);
   const [classicExpanded, setClassicExpanded] = useState(false);
   const addLayer = useLayerStore(state => state.addLayer);
   const addClassicModel = useLayerStore(state => state.addClassicModel);
   const datasetInfo = useDatasetStore(state => state.datasetInfo);
+  const splitStrategy = useDatasetStore(state => state.splitStrategy);
+  const groupField = useDatasetStore(state => state.groupField);
+  const timeField = useDatasetStore(state => state.timeField);
+  const targetField = useDatasetStore(state => state.targetField);
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active } = event;
@@ -45,6 +59,43 @@ export default function LayerLibrary() {
     addLayer(layerType, [0, nextY, 0]);
   };
 
+  /**
+   * 预设添加的唯一实现：整张卡片的鼠标点击与卡片上的「+ 添加」按钮都调用这里，
+   * 不写第二套业务规则。逻辑与原 inline handler 逐行一致。
+   */
+  const addClassicPreset = (model: ClassicModel) => {
+    // 根据当前数据集适配整个模型：
+    // Input 层形状 + 下游 Conv2D.inChannels / Linear.inFeatures 自动修正
+    let layersToAdd = model.layers;
+    if (datasetInfo?.type === 'csv') {
+      // CSV 是单目标表格回归：以 1×1×特征数编码输入，并把最后一个
+      // Linear 自动改为单值输出。特征列推导共用 datasetContract 单一来源，
+      // 不在此处猜测末列即目标：未选目标列时不预适配，
+      // 由数据集面板选目标后的适配确认与统一 Preflight 接管。
+      const featureCount = deriveCsvFeatureFields(datasetInfo, {
+        splitStrategy,
+        groupField,
+        timeField,
+        targetField,
+      })?.length ?? 0;
+      if (featureCount > 0) {
+        layersToAdd = adaptLayersForCsvRegression(model.layers, featureCount);
+      }
+    } else if (
+      datasetInfo &&
+      datasetInfo.channels != null &&
+      datasetInfo.imageHeight != null &&
+      datasetInfo.imageWidth != null
+    ) {
+      layersToAdd = adaptLayersToInputShape(model.layers, [
+        datasetInfo.channels,
+        datasetInfo.imageHeight,
+        datasetInfo.imageWidth,
+      ]);
+    }
+    addClassicModel(layersToAdd);
+  };
+
   // 按分类分组
   const groupedLayers: Record<string, LayerMeta[]> = {};
   LAYER_META_LIST.forEach(layer => {
@@ -58,6 +109,7 @@ export default function LayerLibrary() {
   return (
     <DndContext onDragEnd={handleDragEnd}>
       <div
+        data-testid="block-library"
         style={{
           height: '100%',
           display: 'flex',
@@ -66,13 +118,25 @@ export default function LayerLibrary() {
         }}
       >
         {/* 面板标题 */}
-        <div
-          onClick={() => setCollapsed(!collapsed)}
+        {/*
+          原生 button 负责键盘激活：Enter / Space 由浏览器合成一次 click，
+          这里不另写 keydown，否则一次按键会先收起又展开。
+          border 必须先归零再补回分隔线，否则原生 button 的 UA 边框会改变标题高度。
+        */}
+        <button
+          type="button"
+          onClick={() => setCollapsed(value => !value)}
+          aria-expanded={!collapsed}
+          aria-controls={LAYER_LIST_ID}
           style={{
+            width: '100%',
             padding: '12px',
+            border: 'none',
             borderBottom: '1px solid #0f3460',
+            backgroundColor: 'transparent',
             cursor: 'pointer',
             userSelect: 'none',
+            textAlign: 'left',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
@@ -84,11 +148,12 @@ export default function LayerLibrary() {
           <span style={{ color: '#94a3b8', fontSize: '12px' }}>
             {collapsed ? '▶' : '▼'}
           </span>
-        </div>
+        </button>
 
         {/* 层列表 */}
         {!collapsed && (
           <div
+            id={LAYER_LIST_ID}
             style={{
               flex: 1,
               overflow: 'auto',
@@ -96,58 +161,50 @@ export default function LayerLibrary() {
             }}
           >
             {/* ===== 经典模型 ===== */}
-            <div style={{ marginBottom: '16px' }}>
-              <div
-                onClick={() => setClassicExpanded(!classicExpanded)}
+            <div style={{ marginBottom: '16px' }} data-testid="classic-models-section">
+              {/*
+                原生 button 负责键盘激活：Enter / Space 由浏览器合成一次 click，
+                这里不再绑定 keydown，否则一次按键会先展开又收起。
+                样式必须显式抵消原生 button 的边框与背景，否则标题尺寸会变。
+              */}
+              <button
+                type="button"
+                onClick={() => setClassicExpanded(value => !value)}
+                aria-expanded={classicExpanded}
+                aria-controls={CLASSIC_MODELS_LIST_ID}
                 style={{
+                  width: '100%',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
                   color: classicExpanded ? '#60a5fa' : '#94a3b8',
                   fontSize: '11px',
                   fontWeight: 600,
                   marginBottom: '8px',
                   paddingLeft: '4px',
+                  backgroundColor: 'transparent',
+                  border: 'none',
                   cursor: 'pointer',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
+                  textAlign: 'left',
                 }}
               >
                 <span>经典模型</span>
                 <span style={{ fontSize: '10px' }}>{classicExpanded ? '▼' : '▶'}</span>
-              </div>
+              </button>
 
               {classicExpanded && (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div
+                  id={CLASSIC_MODELS_LIST_ID}
+                  style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}
+                >
                   {CLASSIC_MODELS.map(model => {
                     const isCompatible = !datasetInfo || !model.compatibleDatasets ||
                       model.compatibleDatasets.includes(datasetInfo.type);
                     return (
                     <div
                       key={model.id}
-                      onClick={() => {
-                        // 根据当前数据集适配整个模型：
-                        // Input 层形状 + 下游 Conv2D.inChannels / Linear.inFeatures 自动修正
-                        let layersToAdd = model.layers;
-                        if (datasetInfo?.type === 'csv') {
-                          // CSV 是表格数据：以 1×1×特征数 编码适配（Flatten 输出 = 特征数）；
-                          // 卷积模型无法完整适配（形状链在卷积层断开），由校验错误面板引导用户
-                          const featureCount = (datasetInfo.columns?.length ?? 0) - 1;
-                          if (featureCount > 0) {
-                            layersToAdd = adaptLayersToInputShape(model.layers, [1, 1, featureCount]);
-                          }
-                        } else if (
-                          datasetInfo &&
-                          datasetInfo.channels != null &&
-                          datasetInfo.imageHeight != null &&
-                          datasetInfo.imageWidth != null
-                        ) {
-                          layersToAdd = adaptLayersToInputShape(model.layers, [
-                            datasetInfo.channels,
-                            datasetInfo.imageHeight,
-                            datasetInfo.imageWidth,
-                          ]);
-                        }
-                        addClassicModel(layersToAdd);
-                      }}
+                      data-testid={`model-card-${model.id}`}
+                      onClick={() => addClassicPreset(model)}
                       style={{
                         padding: '10px',
                         backgroundColor: '#0f3460',
@@ -191,7 +248,31 @@ export default function LayerLibrary() {
                             </span>
                           )}
                         </div>
-                        <span style={{ color: '#3b82f6', fontSize: '10px', fontWeight: 600 }}>+ 添加</span>
+                        {/*
+                          键盘可用的添加入口：可见文案仍是「+ 添加」，可访问名称带模型名。
+                          必须阻止冒泡，否则父卡片的 onClick 会再添加一套同样的预设。
+                        */}
+                        <button
+                          type="button"
+                          aria-label={`添加 ${model.name} 预设`}
+                          onClick={event => {
+                            event.stopPropagation();
+                            addClassicPreset(model);
+                          }}
+                          style={{
+                            color: '#3b82f6',
+                            fontSize: '10px',
+                            fontWeight: 600,
+                            backgroundColor: 'transparent',
+                            border: 'none',
+                            padding: 0,
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap',
+                            flexShrink: 0,
+                          }}
+                        >
+                          + 添加
+                        </button>
                       </div>
                     </div>
                     );

@@ -37,7 +37,8 @@ export function useDataset(): DatasetResult {
       }
 
       // 保存数据集信息到 Store
-      setDataset(result);
+      // 路径是训练配置的一部分；丢失它会导致导入成功但 sidecar 收不到 dataPath。
+      setDataset(result, path);
     } catch (error) {
       console.error('Failed to import dataset:', error);
       throw error;
@@ -49,19 +50,35 @@ export function useDataset(): DatasetResult {
     // 定义内置数据集的预设信息
     const builtinDatasets: Record<string, DatasetInfo> = {
       mnist: {
+        datasetId: 'builtin-mnist-torchvision-v1',
+        contentHash: 'builtin:mnist:torchvision-v1',
+        importedAt: Date.now(),
+        sampleUnit: 'image',
+        sampleIndependence: 'machine_verified',
+        sampleUnitDeclaration: 'TorchVision 官方预定义 train/test 样本',
+        machineChecks: [],
         type: 'mnist',
         name: 'MNIST',
         sampleCount: 70000,
         classCount: 10,
+        classNames: Array.from({ length: 10 }, (_value, index) => String(index)),
         imageWidth: 28,
         imageHeight: 28,
         channels: 1,
       },
       cifar10: {
+        datasetId: 'builtin-cifar10-torchvision-v1',
+        contentHash: 'builtin:cifar10:torchvision-v1',
+        importedAt: Date.now(),
+        sampleUnit: 'image',
+        sampleIndependence: 'machine_verified',
+        sampleUnitDeclaration: 'TorchVision 官方预定义 train/test 样本',
+        machineChecks: [],
         type: 'cifar10',
         name: 'CIFAR-10',
         sampleCount: 60000,
         classCount: 10,
+        classNames: ['airplane', 'automobile', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck'],
         imageWidth: 32,
         imageHeight: 32,
         channels: 3,

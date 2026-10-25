@@ -156,7 +156,7 @@ export default function NeuroScene() {
   }, []);
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+    <div className="neuro-scene" data-testid="neuro-scene">
       {/* 空场景引导 */}
       {layers.length === 0 && (
         <div style={{
@@ -174,15 +174,15 @@ export default function NeuroScene() {
             fontWeight: 600,
             marginBottom: '12px',
           }}>
-            从左侧拖拽层组件到场景中
+            点击左侧层组件，自动加入场景
           </div>
           <div style={{
             color: '#64748b',
             fontSize: '13px',
             lineHeight: '1.8',
           }}>
-            拖拽层积木到 3D 场景搭建网络<br />
-            或点击经典模型一键添加
+            积木会按网络顺序自动排列<br />
+            也可选择经典模型一键添加
           </div>
           <div style={{
             marginTop: '16px',

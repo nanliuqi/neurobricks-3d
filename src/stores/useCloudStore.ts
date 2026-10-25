@@ -1,6 +1,18 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { SSHConfig, CloudTask, CloudTaskStatus } from '../types/cloud';
+import { sanitizePersistedSSHConfigs, stripSSHSecrets } from '@/utils/sshCredentialPolicy';
+
+const CLOUD_STORE_VERSION = 1;
+
+type PersistedCloudState = Pick<CloudState, 'servers'>;
+
+export function sanitizePersistedCloudState(value: unknown): PersistedCloudState {
+  if (!value || typeof value !== 'object') return { servers: [] };
+  return {
+    servers: sanitizePersistedSSHConfigs((value as { servers?: unknown }).servers),
+  };
+}
 
 interface CloudState {
   servers: SSHConfig[];
@@ -84,7 +96,18 @@ export const useCloudStore = create<CloudState & CloudActions>()(
     }),
     {
       name: 'neurobricks-cloud',
-      partialize: (state) => ({ servers: state.servers }),
+      version: CLOUD_STORE_VERSION,
+      partialize: (state): PersistedCloudState => ({
+        servers: state.servers.map(stripSSHSecrets),
+      }),
+      migrate: (persistedState) => sanitizePersistedCloudState(persistedState),
+      merge: (persistedState, currentState) => ({
+        ...currentState,
+        ...sanitizePersistedCloudState(persistedState),
+        // Tasks describe live remote processes and cannot be trusted after a
+        // renderer restart without a server-side reconciliation protocol.
+        tasks: [],
+      }),
     }
   )
 );

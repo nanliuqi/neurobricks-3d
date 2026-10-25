@@ -11,6 +11,7 @@ __pycache__/
 *.pyo
 *.egg-info/
 .venv/
+.venv-package-*/
 venv/
 
 # PyInstaller build artifacts
@@ -25,6 +26,28 @@ Thumbs.db
 # Environment
 .env
 .env.local
+.env.*
+!.env.example
+!.env.sample
+
+# Local credentials/certificates (never publish actual private material)
+*.pem
+*.key
+*.pfx
+*.p12
+id_rsa
+id_ed25519
+.git-credentials
+.npmrc
+.pypirc
+
+# Local model/runtime artifacts; keep source/configuration files
+*.pt
+*.pth
+*.onnx
+*.safetensors
+*.npz
+*.npy
 
 # Tauri
 src-tauri/target/
@@ -37,3 +60,16 @@ src-tauri/target/
 
 # 调试/验证用临时截图
 __verify-imgs/
+
+src-tauri/sidecars/nb-trainer/weights_pack/
+
+# One-off developer tools and generated extraction intermediates
+/check_keys.py
+/patch_monitor.py
+/scripts/_classic_models_entry.ts
+/scripts/_classic_models_bundle.mjs
+/src-tauri/sidecars/nb-trainer/__diag_notes.md
+/src-tauri/sidecars/nb-trainer/weights_pack_log.txt
+
+# Personal editor settings (already tracked settings are retained)
+.vscode/

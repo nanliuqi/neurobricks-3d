@@ -34,74 +34,59 @@ const TitleBar = () => {
   };
 
   return (
-    <div
-      style={{
-        position: 'relative',
-        zIndex: 9999,
-        height: 32,
-        backgroundColor: '#111827',
-        borderBottom: '1px solid #374151',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingLeft: 12,
-        paddingRight: 0,
-        flexShrink: 0,
-        userSelect: 'none',
-      }}
-    >
+    <header className="app-title-bar" aria-label="应用标题栏">
       {/* 左侧标题：拖拽区域 */}
       <div
         onPointerDown={handleDragStart}
-        style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, height: '100%', cursor: 'default' }}
+        className="app-title-bar__drag-region"
       >
-        <span style={{ color: 'white', fontSize: 12, fontWeight: 600 }}>NeuroBricks 3D</span>
-        <span style={{ color: '#6b7280', fontSize: 10 }}>v0.1.0</span>
+        <span className="app-title-bar__name">NeuroBricks 3D</span>
+        <span className="app-title-bar__version">v0.1.0</span>
       </div>
 
       {/* 右侧窗口控制按钮 */}
-      <div style={{ display: 'flex', alignItems: 'center' }}>
+      <div className="app-title-bar__controls" role="group" aria-label="窗口控制">
         <button
+          type="button"
           onClick={handleMinimize}
-          style={{ width: 46, height: 32, border: 'none', background: 'transparent', color: '#9ca3af', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-          onMouseEnter={e => { e.currentTarget.style.background = '#374151'; e.currentTarget.style.color = 'white'; }}
-          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#9ca3af'; }}
+          className="app-title-bar__button"
+          aria-label="最小化窗口"
           title="最小化"
         >
-          <svg width="10" height="1" viewBox="0 0 10 1" fill="currentColor"><rect width="10" height="1" /></svg>
+          <svg width="10" height="1" viewBox="0 0 10 1" fill="currentColor" aria-hidden="true"><rect width="10" height="1" /></svg>
         </button>
         <button
+          type="button"
           onClick={handleMaximize}
-          style={{ width: 46, height: 32, border: 'none', background: 'transparent', color: '#9ca3af', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-          onMouseEnter={e => { e.currentTarget.style.background = '#374151'; e.currentTarget.style.color = 'white'; }}
-          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#9ca3af'; }}
-          title="最大化"
+          className="app-title-bar__button"
+          aria-label={maximized ? '还原窗口' : '最大化窗口'}
+          title={maximized ? '还原' : '最大化'}
         >
           {maximized ? (
-            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1">
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1" aria-hidden="true">
               <rect x="2.5" y="0.5" width="7" height="7" />
               <rect x="0.5" y="2.5" width="7" height="7" />
             </svg>
           ) : (
-            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1">
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1" aria-hidden="true">
               <rect x="1.5" y="1.5" width="7" height="7" />
             </svg>
           )}
         </button>
         <button
+          type="button"
           onClick={handleClose}
-          style={{ width: 46, height: 32, border: 'none', background: 'transparent', color: '#9ca3af', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-          onMouseEnter={e => { e.currentTarget.style.background = '#dc2626'; e.currentTarget.style.color = 'white'; }}
-          onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#9ca3af'; }}
+          className="app-title-bar__button app-title-bar__button--close"
+          aria-label="关闭窗口"
           title="关闭"
         >
-          <svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor" strokeWidth="1.2">
+          <svg width="10" height="10" viewBox="0 0 10 10" stroke="currentColor" strokeWidth="1.2" aria-hidden="true">
             <line x1="1" y1="1" x2="9" y2="9" />
             <line x1="9" y1="1" x2="1" y2="9" />
           </svg>
         </button>
       </div>
-    </div>
+    </header>
   );
 };
 

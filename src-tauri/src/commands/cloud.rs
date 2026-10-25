@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
+use ssh2::Session;
 use std::net::TcpStream;
 use std::time::Duration;
-use ssh2::Session;
 use tauri::Manager;
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -31,50 +31,93 @@ pub struct CloudResultFile {
     pub downloaded: bool,
 }
 
+fn validate_remote_work_dir(path: &str) -> Result<(), String> {
+    if path.is_empty() || path.len() > 512 || !path.starts_with('/') {
+        return Err("远程工作目录必须是长度不超过 512 的绝对路径".to_string());
+    }
+    if path.split('/').any(|component| component == "..") {
+        return Err("远程工作目录不能包含父目录跳转".to_string());
+    }
+    if !path.chars().all(|character| {
+        character.is_ascii_alphanumeric() || matches!(character, '/' | '_' | '-' | '.')
+    }) {
+        return Err("远程工作目录包含不受支持的字符".to_string());
+    }
+    Ok(())
+}
+
+fn validate_remote_pid(pid: &str) -> Result<(), String> {
+    if pid.is_empty() || pid.len() > 20 || !pid.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err("远程进程标识必须是纯数字 PID".to_string());
+    }
+    let parsed = pid
+        .parse::<u64>()
+        .map_err(|_| "远程进程标识超出有效范围".to_string())?;
+    if parsed == 0 {
+        return Err("远程进程标识必须大于 0".to_string());
+    }
+    Ok(())
+}
+
+fn validate_server_id(id: &str) -> Result<(), String> {
+    uuid::Uuid::parse_str(id)
+        .map(|_| ())
+        .map_err(|_| "服务器标识格式无效".to_string())
+}
+
 #[tauri::command]
 pub fn test_ssh_connection(config: SSHConfig) -> Result<(), String> {
     // 建立 TCP 连接
     let tcp = TcpStream::connect_timeout(
-        &format!("{}:{}", config.host, config.port).parse().map_err(|e: std::net::AddrParseError| e.to_string())?,
+        &format!("{}:{}", config.host, config.port)
+            .parse()
+            .map_err(|e: std::net::AddrParseError| e.to_string())?,
         Duration::from_secs(10),
-    ).map_err(|e| format!("连接失败: {}", e))?;
-    
+    )
+    .map_err(|e| format!("连接失败: {}", e))?;
+
     tcp.set_read_timeout(Some(Duration::from_secs(10)))
         .map_err(|e| e.to_string())?;
-    
+
     // 创建 SSH Session
     let mut session = Session::new().map_err(|e| e.to_string())?;
     session.set_tcp_stream(tcp);
-    session.handshake().map_err(|e| format!("SSH 握手失败: {}", e))?;
-    
+    session
+        .handshake()
+        .map_err(|e| format!("SSH 握手失败: {}", e))?;
+
     // 认证
     match config.auth_type.as_str() {
         "password" => {
             let password = config.password.as_deref().unwrap_or("");
-            session.userauth_password(&config.username, password)
+            session
+                .userauth_password(&config.username, password)
                 .map_err(|e| format!("密码认证失败: {}", e))?;
         }
         "private_key" => {
             let key_path = config.private_key_path.as_deref().unwrap_or("");
             let passphrase = config.passphrase.as_deref();
-            session.userauth_pubkey_file(
-                &config.username,
-                None,
-                std::path::Path::new(key_path),
-                passphrase,
-            ).map_err(|e| format!("私钥认证失败: {}", e))?;
+            session
+                .userauth_pubkey_file(
+                    &config.username,
+                    None,
+                    std::path::Path::new(key_path),
+                    passphrase,
+                )
+                .map_err(|e| format!("私钥认证失败: {}", e))?;
         }
         _ => return Err(format!("未知认证方式: {}", config.auth_type)),
     }
-    
+
     if !session.authenticated() {
         return Err("认证失败".to_string());
     }
-    
+
     // 断开
-    session.disconnect(None, "Test complete", None)
+    session
+        .disconnect(None, "Test complete", None)
         .unwrap_or(());
-    
+
     Ok(())
 }
 
@@ -84,66 +127,87 @@ pub fn submit_cloud_training(
     train_config: crate::commands::training::TrainConfig,
     app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
+    validate_server_id(&server_config.id)?;
+    validate_remote_work_dir(&server_config.remote_work_dir)?;
+
     // 生成任务 ID
     let task_id = uuid::Uuid::new_v4().to_string();
-    
+
     // 建立 SSH 连接
     let tcp = TcpStream::connect_timeout(
-        &format!("{}:{}", server_config.host, server_config.port).parse().map_err(|e: std::net::AddrParseError| e.to_string())?,
+        &format!("{}:{}", server_config.host, server_config.port)
+            .parse()
+            .map_err(|e: std::net::AddrParseError| e.to_string())?,
         Duration::from_secs(10),
-    ).map_err(|e| format!("连接失败: {}", e))?;
-    
+    )
+    .map_err(|e| format!("连接失败: {}", e))?;
+
     let mut session = Session::new().map_err(|e| e.to_string())?;
     session.set_tcp_stream(tcp);
-    session.handshake().map_err(|e| format!("SSH 握手失败: {}", e))?;
-    
+    session
+        .handshake()
+        .map_err(|e| format!("SSH 握手失败: {}", e))?;
+
     // 认证
     authenticate_session(&session, &server_config)?;
-    
+
     // 上传训练文件
     upload_training_files(&session, &server_config, &train_config)?;
-    
+
     // 启动远程训练
     let pid = start_remote_training(&session, &server_config.remote_work_dir)?;
-    
+
     // 断开连接
-    session.disconnect(None, "Training submitted", None).unwrap_or(());
-    
+    session
+        .disconnect(None, "Training submitted", None)
+        .unwrap_or(());
+
     // 通知前端
-    let _ = app_handle.emit_all("cloud-training-started", serde_json::json!({
-        "taskId": task_id,
-        "pid": pid
-    }));
+    let _ = app_handle.emit_all(
+        "cloud-training-started",
+        serde_json::json!({
+            "taskId": task_id,
+            "pid": pid
+        }),
+    );
 
     Ok(task_id)
 }
 
 #[tauri::command]
-pub fn stop_cloud_training(
-    server_config: SSHConfig,
-    remote_pid: String,
-) -> Result<(), String> {
+pub fn stop_cloud_training(server_config: SSHConfig, remote_pid: String) -> Result<(), String> {
+    validate_server_id(&server_config.id)?;
+    validate_remote_work_dir(&server_config.remote_work_dir)?;
+    validate_remote_pid(&remote_pid)?;
+
     // 建立 SSH 连接
     let tcp = TcpStream::connect_timeout(
-        &format!("{}:{}", server_config.host, server_config.port).parse().map_err(|e: std::net::AddrParseError| e.to_string())?,
+        &format!("{}:{}", server_config.host, server_config.port)
+            .parse()
+            .map_err(|e: std::net::AddrParseError| e.to_string())?,
         Duration::from_secs(10),
-    ).map_err(|e| format!("连接失败: {}", e))?;
-    
+    )
+    .map_err(|e| format!("连接失败: {}", e))?;
+
     let mut session = Session::new().map_err(|e| e.to_string())?;
     session.set_tcp_stream(tcp);
-    session.handshake().map_err(|e| format!("SSH 握手失败: {}", e))?;
-    
+    session
+        .handshake()
+        .map_err(|e| format!("SSH 握手失败: {}", e))?;
+
     // 认证
     authenticate_session(&session, &server_config)?;
-    
+
     // 停止远程进程
     let mut channel = session.channel_session().map_err(|e| e.to_string())?;
     let command = format!("kill {}", remote_pid);
     channel.exec(&command).map_err(|e| e.to_string())?;
     channel.wait_close().map_err(|e| e.to_string())?;
-    
-    session.disconnect(None, "Training stopped", None).unwrap_or(());
-    
+
+    session
+        .disconnect(None, "Training stopped", None)
+        .unwrap_or(());
+
     Ok(())
 }
 
@@ -153,31 +217,41 @@ pub fn download_results(
     remote_dir: String,
 ) -> Result<Vec<CloudResultFile>, String> {
     use std::path::PathBuf;
-    
+
+    validate_server_id(&server_config.id)?;
+    validate_remote_work_dir(&remote_dir)?;
+
     // 建立 SSH 连接
     let tcp = TcpStream::connect_timeout(
-        &format!("{}:{}", server_config.host, server_config.port).parse().map_err(|e: std::net::AddrParseError| e.to_string())?,
+        &format!("{}:{}", server_config.host, server_config.port)
+            .parse()
+            .map_err(|e: std::net::AddrParseError| e.to_string())?,
         Duration::from_secs(10),
-    ).map_err(|e| format!("连接失败: {}", e))?;
-    
+    )
+    .map_err(|e| format!("连接失败: {}", e))?;
+
     let mut session = Session::new().map_err(|e| e.to_string())?;
     session.set_tcp_stream(tcp);
-    session.handshake().map_err(|e| format!("SSH 握手失败: {}", e))?;
-    
+    session
+        .handshake()
+        .map_err(|e| format!("SSH 握手失败: {}", e))?;
+
     // 认证
     authenticate_session(&session, &server_config)?;
-    
+
     // 获取 SFTP
     let sftp = session.sftp().map_err(|e| e.to_string())?;
-    
+
     // 列出远程文件
     let remote_path = std::path::Path::new(&remote_dir);
-    let files = sftp.readdir(remote_path).map_err(|e| format!("读取目录失败: {}", e))?;
-    
+    let files = sftp
+        .readdir(remote_path)
+        .map_err(|e| format!("读取目录失败: {}", e))?;
+
     // 创建本地下载目录
     let local_base = PathBuf::from("downloads").join(&server_config.id);
     std::fs::create_dir_all(&local_base).map_err(|e| e.to_string())?;
-    
+
     // 下载文件
     let mut result_files = Vec::new();
     for (entry, _) in files {
@@ -185,12 +259,14 @@ pub fn download_results(
             if name.ends_with(".pth") || name.ends_with(".log") || name.ends_with(".json") {
                 let remote_file_path = remote_dir.clone() + "/" + name;
                 let local_file_path = local_base.join(name);
-                
+
                 // 下载文件
                 download_file(&sftp, &remote_file_path, &local_file_path)?;
-                
-                let file_size = std::fs::metadata(&local_file_path).map(|m| m.len()).unwrap_or(0);
-                
+
+                let file_size = std::fs::metadata(&local_file_path)
+                    .map(|m| m.len())
+                    .unwrap_or(0);
+
                 result_files.push(CloudResultFile {
                     name: name.to_string(),
                     remote_path: remote_file_path,
@@ -201,9 +277,11 @@ pub fn download_results(
             }
         }
     }
-    
-    session.disconnect(None, "Download complete", None).unwrap_or(());
-    
+
+    session
+        .disconnect(None, "Download complete", None)
+        .unwrap_or(());
+
     Ok(result_files)
 }
 
@@ -212,26 +290,29 @@ fn authenticate_session(session: &Session, config: &SSHConfig) -> Result<(), Str
     match config.auth_type.as_str() {
         "password" => {
             let password = config.password.as_deref().unwrap_or("");
-            session.userauth_password(&config.username, password)
+            session
+                .userauth_password(&config.username, password)
                 .map_err(|e| format!("密码认证失败: {}", e))?;
         }
         "private_key" => {
             let key_path = config.private_key_path.as_deref().unwrap_or("");
             let passphrase = config.passphrase.as_deref();
-            session.userauth_pubkey_file(
-                &config.username,
-                None,
-                std::path::Path::new(key_path),
-                passphrase,
-            ).map_err(|e| format!("私钥认证失败: {}", e))?;
+            session
+                .userauth_pubkey_file(
+                    &config.username,
+                    None,
+                    std::path::Path::new(key_path),
+                    passphrase,
+                )
+                .map_err(|e| format!("私钥认证失败: {}", e))?;
         }
         _ => return Err(format!("未知认证方式: {}", config.auth_type)),
     }
-    
+
     if !session.authenticated() {
         return Err("认证失败".to_string());
     }
-    
+
     Ok(())
 }
 
@@ -244,25 +325,35 @@ fn upload_file(sftp: &ssh2::Sftp, local_path: &str, remote_path: &str) -> Result
 // 辅助函数：上传字节数据
 fn upload_bytes(sftp: &ssh2::Sftp, data: &[u8], remote_path: &str) -> Result<(), String> {
     use std::io::Write;
-    
-    let mut remote_file = sftp.create(std::path::Path::new(remote_path))
+
+    let mut remote_file = sftp
+        .create(std::path::Path::new(remote_path))
         .map_err(|e| format!("创建远程文件失败: {}", e))?;
-    remote_file.write_all(data).map_err(|e| format!("写入文件失败: {}", e))?;
+    remote_file
+        .write_all(data)
+        .map_err(|e| format!("写入文件失败: {}", e))?;
     Ok(())
 }
 
 // 辅助函数：下载单个文件
-fn download_file(sftp: &ssh2::Sftp, remote_path: &str, local_path: &std::path::Path) -> Result<(), String> {
+fn download_file(
+    sftp: &ssh2::Sftp,
+    remote_path: &str,
+    local_path: &std::path::Path,
+) -> Result<(), String> {
     use std::io::Read;
-    
-    let mut remote_file = sftp.open(std::path::Path::new(remote_path))
+
+    let mut remote_file = sftp
+        .open(std::path::Path::new(remote_path))
         .map_err(|e| format!("打开远程文件失败: {}", e))?;
-    
+
     let mut content = Vec::new();
-    remote_file.read_to_end(&mut content).map_err(|e| format!("读取文件失败: {}", e))?;
-    
+    remote_file
+        .read_to_end(&mut content)
+        .map_err(|e| format!("读取文件失败: {}", e))?;
+
     std::fs::write(local_path, &content).map_err(|e| format!("写入本地文件失败: {}", e))?;
-    
+
     Ok(())
 }
 
@@ -274,10 +365,10 @@ fn upload_training_files(
 ) -> Result<(), String> {
     let sftp = session.sftp().map_err(|e| e.to_string())?;
     let remote_dir = &config.remote_work_dir;
-    
+
     // 创建远程目录
     sftp.mkdir(std::path::Path::new(remote_dir), 0o755).ok();
-    
+
     // 上传 Python 文件
     let files = ["main.py", "models.py", "train.py", "requirements.txt"];
     for file in &files {
@@ -285,35 +376,39 @@ fn upload_training_files(
         let remote_path = format!("{}/{}", remote_dir, file);
         upload_file(&sftp, &local_path, &remote_path)?;
     }
-    
+
     // 上传训练配置
     let config_json = serde_json::to_string(train_config).map_err(|e| e.to_string())?;
     let remote_config_path = format!("{}/config.json", remote_dir);
     upload_bytes(&sftp, config_json.as_bytes(), &remote_config_path)?;
-    
+
     Ok(())
 }
 
 // 辅助函数：启动远程训练
 fn start_remote_training(session: &Session, remote_dir: &str) -> Result<String, String> {
     use std::io::Read;
-    
+
+    validate_remote_work_dir(remote_dir)?;
+
     let mut channel = session.channel_session().map_err(|e| e.to_string())?;
-    
+
     // 使用 nohup 后台运行
     let command = format!(
         "cd {} && pip install -q -r requirements.txt && nohup python main.py < config.json > train.log 2>&1 & echo $!",
         remote_dir
     );
-    
+
     channel.exec(&command).map_err(|e| e.to_string())?;
     channel.wait_close().map_err(|e| e.to_string())?;
-    
+
     // 读取 PID
     let mut pid = String::new();
-    channel.read_to_string(&mut pid).map_err(|e| e.to_string())?;
+    channel
+        .read_to_string(&mut pid)
+        .map_err(|e| e.to_string())?;
     let pid = pid.trim().to_string();
-    
+
     Ok(pid)
 }
 
@@ -323,34 +418,55 @@ pub fn poll_cloud_training(
     remote_pid: String,
 ) -> Result<serde_json::Value, String> {
     use std::io::Read;
-    
+
+    validate_server_id(&server_config.id)?;
+    validate_remote_work_dir(&server_config.remote_work_dir)?;
+    validate_remote_pid(&remote_pid)?;
+
     // SSH 连接
     let tcp = TcpStream::connect_timeout(
-        &format!("{}:{}", server_config.host, server_config.port).parse().map_err(|e: std::net::AddrParseError| e.to_string())?,
+        &format!("{}:{}", server_config.host, server_config.port)
+            .parse()
+            .map_err(|e: std::net::AddrParseError| e.to_string())?,
         Duration::from_secs(10),
-    ).map_err(|e| format!("连接失败: {}", e))?;
+    )
+    .map_err(|e| format!("连接失败: {}", e))?;
 
     let mut session = Session::new().map_err(|e| e.to_string())?;
     session.set_tcp_stream(tcp);
-    session.handshake().map_err(|e| format!("SSH 握手失败: {}", e))?;
+    session
+        .handshake()
+        .map_err(|e| format!("SSH 握手失败: {}", e))?;
     authenticate_session(&session, &server_config)?;
 
     // 检查进程是否还在运行
     let mut channel = session.channel_session().map_err(|e| e.to_string())?;
-    channel.exec(&format!("kill -0 {} 2>/dev/null && echo 'running' || echo 'stopped'", remote_pid))
+    channel
+        .exec(&format!(
+            "kill -0 {} 2>/dev/null && echo 'running' || echo 'stopped'",
+            remote_pid
+        ))
         .map_err(|e| e.to_string())?;
     channel.wait_close().map_err(|e| e.to_string())?;
     let mut status_output = String::new();
-    channel.read_to_string(&mut status_output).map_err(|e| e.to_string())?;
+    channel
+        .read_to_string(&mut status_output)
+        .map_err(|e| e.to_string())?;
     let is_running = status_output.trim() == "running";
 
     // 读取日志最后几行
     let mut log_channel = session.channel_session().map_err(|e| e.to_string())?;
-    log_channel.exec(&format!("tail -n 5 {}/train.log 2>/dev/null", server_config.remote_work_dir))
+    log_channel
+        .exec(&format!(
+            "tail -n 5 {}/train.log 2>/dev/null",
+            server_config.remote_work_dir
+        ))
         .map_err(|e| e.to_string())?;
     log_channel.wait_close().map_err(|e| e.to_string())?;
     let mut log_output = String::new();
-    log_channel.read_to_string(&mut log_output).map_err(|e| e.to_string())?;
+    log_channel
+        .read_to_string(&mut log_output)
+        .map_err(|e| e.to_string())?;
 
     session.disconnect(None, "Poll done", None).unwrap_or(());
 
@@ -366,4 +482,43 @@ pub fn poll_cloud_training(
         "status": if is_running { "running" } else { "completed" },
         "metrics": last_metrics,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{validate_remote_pid, validate_remote_work_dir, validate_server_id};
+
+    #[test]
+    fn accepts_the_existing_cloud_defaults() {
+        assert!(validate_remote_work_dir("/tmp/neurobricks").is_ok());
+        assert!(validate_remote_pid("12345").is_ok());
+        assert!(validate_server_id("5d59838b-1d55-46e9-9d90-100bc995dd88").is_ok());
+    }
+
+    #[test]
+    fn rejects_shell_metacharacters_and_parent_traversal_in_remote_paths() {
+        for path in [
+            "/tmp/neurobricks;rm-x",
+            "/tmp/neurobricks && other",
+            "/tmp/../root",
+            "/tmp/neurobricks\nother",
+            "relative/path",
+        ] {
+            assert!(validate_remote_work_dir(path).is_err(), "accepted {path:?}");
+        }
+    }
+
+    #[test]
+    fn rejects_non_numeric_or_zero_remote_process_identifiers() {
+        for pid in ["", "0", "-1", "12;shutdown", "1 2", "999999999999999999999"] {
+            assert!(validate_remote_pid(pid).is_err(), "accepted {pid:?}");
+        }
+    }
+
+    #[test]
+    fn rejects_server_ids_that_could_escape_the_download_directory() {
+        for id in ["", "../../outside", "server-1", "id/child"] {
+            assert!(validate_server_id(id).is_err(), "accepted {id:?}");
+        }
+    }
 }

@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useCloudStore } from '@/stores/useCloudStore';
 import { useLayerStore } from '@/stores/useLayerStore';
 import { useDatasetStore } from '@/stores/useDatasetStore';
 import { useCloudTraining } from '@/hooks/useCloudTraining';
 import { toast } from '@/components/ui/Toast';
-import type { TrainConfig } from '@/types/training';
+import type { TrainConfig, TrainMetric } from '@/types/training';
 import type { SSHConfig, SSHAuthType, CloudTaskStatus } from '@/types/cloud';
+import { projectLatestTrainingDiagnostics } from '@/utils/trainingMonitorViewModel';
 
 const STATUS_LABELS: Record<CloudTaskStatus, string> = {
   pending: '待上传',
@@ -16,11 +17,41 @@ const STATUS_LABELS: Record<CloudTaskStatus, string> = {
   stopped: '已停止',
 };
 
+function CloudTaskMetricSummary({ metrics }: { metrics: readonly TrainMetric[] }) {
+  if (metrics.length === 0) return null;
+  const diagnostics = projectLatestTrainingDiagnostics(metrics);
+  if (!diagnostics.loss && !diagnostics.metric) {
+    return (
+      <div className="cloud-task-metrics cloud-task-metrics--warning" role="status">
+        指标记录缺少明确作用域或有限数值，未猜测 Loss / Accuracy。
+      </div>
+    );
+  }
+
+  return (
+    <div className="cloud-task-metrics" aria-label="云端任务诊断指标">
+      {[diagnostics.loss, diagnostics.metric].filter((item): item is NonNullable<typeof item> => item !== null)
+        .map(item => (
+          <span key={item.label} className="cloud-task-metrics__item">
+            {item.context} epoch {item.epoch} {item.label}：
+            <strong>{item.valueText}</strong>
+          </span>
+        ))}
+      {diagnostics.warnings.length > 0 && (
+        <span className="cloud-task-metrics__warning" title={diagnostics.warnings.join('\n')}>
+          部分记录未进入摘要
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function CloudPanel() {
   const servers = useCloudStore(state => state.servers);
   const tasks = useCloudStore(state => state.tasks);
   const addServer = useCloudStore(state => state.addServer);
   const removeServer = useCloudStore(state => state.removeServer);
+  const updateServer = useCloudStore(state => state.updateServer);
   const layers = useLayerStore(state => state.layers);
   const datasetInfo = useDatasetStore(state => state.datasetInfo);
   
@@ -33,6 +64,7 @@ export default function CloudPanel() {
   const [epochs, setEpochs] = useState(10);
   const [batchSize, setBatchSize] = useState(32);
   const [learningRate, setLearningRate] = useState(0.001);
+  const [sessionSecret, setSessionSecret] = useState('');
   const [formData, setFormData] = useState({
     name: '',
     host: '',
@@ -42,6 +74,10 @@ export default function CloudPanel() {
     password: '',
     privateKeyPath: '',
   });
+
+  useEffect(() => {
+    setSessionSecret('');
+  }, [selectedServerId]);
 
   // 添加服务器
   const handleAddServer = () => {
@@ -87,6 +123,11 @@ export default function CloudPanel() {
 
   // 测试连接
   const handleTestConnection = async (config: SSHConfig) => {
+    if (config.authType === 'password' && !config.password) {
+      setSelectedServerId(config.id);
+      toast.warning('该服务器的密码未持久化，请先输入本次会话凭据');
+      return;
+    }
     try {
       const { invoke } = await import('@tauri-apps/api/tauri');
       await invoke('test_ssh_connection', { config });
@@ -128,6 +169,10 @@ export default function CloudPanel() {
         toast.warning('请选择服务器');
         return;
       }
+      if (selectedServer.authType === 'password' && !selectedServer.password) {
+        toast.warning('请输入并应用本次会话密码后再提交训练');
+        return;
+      }
 
       await invoke('submit_cloud_training', { 
         serverConfig: selectedServer, 
@@ -143,6 +188,24 @@ export default function CloudPanel() {
   // 获取当前选中服务器的任务
   const currentTasks = tasks.filter(t => t.serverId === selectedServerId);
   const selectedServer = servers.find(s => s.id === selectedServerId);
+
+  const handleApplySessionSecret = () => {
+    if (!selectedServer) return;
+    if (selectedServer.authType === 'password' && sessionSecret.trim() === '') {
+      toast.warning('本次会话密码不能为空');
+      return;
+    }
+
+    updateServer(selectedServer.id, {
+      password: selectedServer.authType === 'password' ? sessionSecret : undefined,
+      passphrase: selectedServer.authType === 'private_key' && sessionSecret !== ''
+        ? sessionSecret
+        : undefined,
+      updatedAt: Date.now(),
+    });
+    setSessionSecret('');
+    toast.success('凭据已应用到本次会话，关闭应用后不会保留');
+  };
 
   return (
     <div style={{ padding: '12px', height: '100%', display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
@@ -163,6 +226,7 @@ export default function CloudPanel() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
           <span style={{ color: '#94a3b8', fontSize: '12px', fontWeight: 600 }}>服务器</span>
           <button
+            type="button"
             onClick={() => setShowAddForm(!showAddForm)}
             style={{
               padding: '4px 10px',
@@ -189,16 +253,16 @@ export default function CloudPanel() {
           }}>
             <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
               <div style={{ flex: 1 }}>
-                <label style={{ display: 'block', color: '#94a3b8', fontSize: '10px', marginBottom: '2px' }}>名称 *</label>
-                <input type="text" value={formData.name}
+                <label htmlFor="cloud-server-name" style={{ display: 'block', color: '#94a3b8', fontSize: '10px', marginBottom: '2px' }}>名称 *</label>
+                <input id="cloud-server-name" type="text" value={formData.name}
                   onChange={e => setFormData({ ...formData, name: e.target.value })}
                   placeholder="我的GPU服务器"
                   style={{ width: '100%', padding: '6px', backgroundColor: '#1a3a5c', border: '1px solid #2a4a6c', borderRadius: '4px', color: 'white', fontSize: '11px' }}
                 />
               </div>
               <div style={{ flex: 1 }}>
-                <label style={{ display: 'block', color: '#94a3b8', fontSize: '10px', marginBottom: '2px' }}>用户名 *</label>
-                <input type="text" value={formData.username}
+                <label htmlFor="cloud-server-username" style={{ display: 'block', color: '#94a3b8', fontSize: '10px', marginBottom: '2px' }}>用户名 *</label>
+                <input id="cloud-server-username" type="text" value={formData.username}
                   onChange={e => setFormData({ ...formData, username: e.target.value })}
                   placeholder="root"
                   style={{ width: '100%', padding: '6px', backgroundColor: '#1a3a5c', border: '1px solid #2a4a6c', borderRadius: '4px', color: 'white', fontSize: '11px' }}
@@ -207,16 +271,16 @@ export default function CloudPanel() {
             </div>
             <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
               <div style={{ flex: 2 }}>
-                <label style={{ display: 'block', color: '#94a3b8', fontSize: '10px', marginBottom: '2px' }}>主机地址 *</label>
-                <input type="text" value={formData.host}
+                <label htmlFor="cloud-server-host" style={{ display: 'block', color: '#94a3b8', fontSize: '10px', marginBottom: '2px' }}>主机地址 *</label>
+                <input id="cloud-server-host" type="text" value={formData.host}
                   onChange={e => setFormData({ ...formData, host: e.target.value })}
                   placeholder="192.168.1.100"
                   style={{ width: '100%', padding: '6px', backgroundColor: '#1a3a5c', border: '1px solid #2a4a6c', borderRadius: '4px', color: 'white', fontSize: '11px' }}
                 />
               </div>
               <div style={{ flex: 1 }}>
-                <label style={{ display: 'block', color: '#94a3b8', fontSize: '10px', marginBottom: '2px' }}>端口</label>
-                <input type="number" value={formData.port}
+                <label htmlFor="cloud-server-port" style={{ display: 'block', color: '#94a3b8', fontSize: '10px', marginBottom: '2px' }}>端口</label>
+                <input id="cloud-server-port" type="number" value={formData.port}
                   onChange={e => setFormData({ ...formData, port: Number(e.target.value) })}
                   min={1} max={65535}
                   style={{ width: '100%', padding: '6px', backgroundColor: '#1a3a5c', border: '1px solid #2a4a6c', borderRadius: '4px', color: 'white', fontSize: '11px' }}
@@ -225,8 +289,8 @@ export default function CloudPanel() {
             </div>
             <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
               <div style={{ flex: 1 }}>
-                <label style={{ display: 'block', color: '#94a3b8', fontSize: '10px', marginBottom: '2px' }}>认证方式</label>
-                <select value={formData.authType}
+                <label htmlFor="cloud-server-auth" style={{ display: 'block', color: '#94a3b8', fontSize: '10px', marginBottom: '2px' }}>认证方式</label>
+                <select id="cloud-server-auth" value={formData.authType}
                   onChange={e => setFormData({ ...formData, authType: e.target.value as SSHAuthType })}
                   style={{ width: '100%', padding: '6px', backgroundColor: '#1a3a5c', border: '1px solid #2a4a6c', borderRadius: '4px', color: 'white', fontSize: '11px' }}
                 >
@@ -235,10 +299,11 @@ export default function CloudPanel() {
                 </select>
               </div>
               <div style={{ flex: 2 }}>
-                <label style={{ display: 'block', color: '#94a3b8', fontSize: '10px', marginBottom: '2px' }}>
+                <label htmlFor="cloud-server-credential" style={{ display: 'block', color: '#94a3b8', fontSize: '10px', marginBottom: '2px' }}>
                   {formData.authType === 'password' ? '密码' : '私钥路径'}
                 </label>
                 <input
+                  id="cloud-server-credential"
                   type={formData.authType === 'password' ? 'password' : 'text'}
                   value={formData.authType === 'password' ? formData.password : formData.privateKeyPath}
                   onChange={e => formData.authType === 'password'
@@ -250,7 +315,7 @@ export default function CloudPanel() {
                 />
               </div>
             </div>
-            <button onClick={handleAddServer}
+            <button type="button" onClick={handleAddServer}
               style={{ width: '100%', padding: '8px', backgroundColor: '#10b981', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>
               确认添加
             </button>
@@ -277,34 +342,38 @@ export default function CloudPanel() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             {servers.map(server => (
               <div key={server.id}
-                onClick={() => setSelectedServerId(server.id === selectedServerId ? '' : server.id)}
                 style={{
                   padding: '10px',
                   backgroundColor: server.id === selectedServerId ? '#1e40af' : '#0f3460',
                   border: server.id === selectedServerId ? '2px solid #3b82f6' : '1px solid #1a3a5c',
                   borderRadius: '6px',
-                  cursor: 'pointer',
                   transition: 'all 0.2s ease',
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <div style={{ color: 'white', fontSize: '12px', fontWeight: 600 }}>
+                  <button
+                    type="button"
+                    className="cloud-server-select"
+                    aria-pressed={server.id === selectedServerId}
+                    aria-label={`${server.id === selectedServerId ? '取消选择' : '选择'}服务器 ${server.name}`}
+                    onClick={() => setSelectedServerId(server.id === selectedServerId ? '' : server.id)}
+                  >
+                    <span className="cloud-server-select__name">
                       {server.name}
                       {server.id === selectedServerId && (
                         <span style={{ marginLeft: '6px', padding: '1px 6px', backgroundColor: '#10b981', borderRadius: '3px', fontSize: '9px', fontWeight: 600, color: 'white' }}>已选中</span>
                       )}
-                    </div>
-                    <div style={{ color: '#94a3b8', fontSize: '10px' }}>
+                    </span>
+                    <span className="cloud-server-select__meta">
                       {server.host}:{server.port} \u00b7 {server.username}
-                    </div>
-                  </div>
+                    </span>
+                  </button>
                   <div style={{ display: 'flex', gap: '4px' }}>
-                    <button onClick={e => { e.stopPropagation(); handleTestConnection(server); }}
+                    <button type="button" onClick={() => void handleTestConnection(server)}
                       style={{ padding: '4px 8px', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '3px', cursor: 'pointer', fontSize: '10px' }}>
                       测试
                     </button>
-                    <button onClick={e => { e.stopPropagation(); removeServer(server.id); if (selectedServerId === server.id) setSelectedServerId(''); }}
+                    <button type="button" onClick={() => { removeServer(server.id); if (selectedServerId === server.id) setSelectedServerId(''); }}
                       style={{ padding: '4px 8px', backgroundColor: '#ef4444', color: 'white', border: 'none', borderRadius: '3px', cursor: 'pointer', fontSize: '10px' }}>
                       删除
                     </button>
@@ -327,30 +396,51 @@ export default function CloudPanel() {
             训练参数 \u00b7 {selectedServer.name}
           </div>
 
+          <div className="cloud-session-credential" role="group" aria-label="本次会话 SSH 凭据">
+            <label htmlFor="cloud-session-secret">
+              {selectedServer.authType === 'password' ? '本次会话密码' : '本次会话私钥口令（可选）'}
+            </label>
+            <div className="cloud-session-credential__controls">
+              <input
+                id="cloud-session-secret"
+                type="password"
+                autoComplete="off"
+                value={sessionSecret}
+                onChange={event => setSessionSecret(event.target.value)}
+                placeholder={selectedServer.authType === 'password'
+                  ? (selectedServer.password ? '已设置，可重新输入替换' : '重启应用后需重新输入')
+                  : (selectedServer.passphrase ? '已设置，可重新输入替换' : '未加密私钥可留空')}
+              />
+              <button type="button" onClick={handleApplySessionSecret}>应用</button>
+            </div>
+            <span>密码和私钥口令只保留在当前进程内，不写入本地配置、实验档案或导出物。</span>
+          </div>
+
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '12px' }}>
             <div style={{ display: 'flex', gap: '8px' }}>
               <div style={{ flex: 1 }}>
-                <label style={{ color: '#94a3b8', fontSize: '10px', marginBottom: '2px', display: 'block' }}>Epochs</label>
-                <input type="number" value={epochs} onChange={e => setEpochs(Number(e.target.value))} min={1} max={100}
+                <label htmlFor="cloud-train-epochs" style={{ color: '#94a3b8', fontSize: '10px', marginBottom: '2px', display: 'block' }}>Epochs</label>
+                <input id="cloud-train-epochs" type="number" value={epochs} onChange={e => setEpochs(Number(e.target.value))} min={1} max={100}
                   style={{ width: '100%', padding: '6px', backgroundColor: '#0f3460', border: '1px solid #1a3a5c', borderRadius: '4px', color: 'white', fontSize: '11px' }}
                 />
               </div>
               <div style={{ flex: 1 }}>
-                <label style={{ color: '#94a3b8', fontSize: '10px', marginBottom: '2px', display: 'block' }}>Batch Size</label>
-                <input type="number" value={batchSize} onChange={e => setBatchSize(Number(e.target.value))} min={1} max={512}
+                <label htmlFor="cloud-train-batch" style={{ color: '#94a3b8', fontSize: '10px', marginBottom: '2px', display: 'block' }}>Batch Size</label>
+                <input id="cloud-train-batch" type="number" value={batchSize} onChange={e => setBatchSize(Number(e.target.value))} min={1} max={512}
                   style={{ width: '100%', padding: '6px', backgroundColor: '#0f3460', border: '1px solid #1a3a5c', borderRadius: '4px', color: 'white', fontSize: '11px' }}
                 />
               </div>
             </div>
             <div>
-              <label style={{ color: '#94a3b8', fontSize: '10px', marginBottom: '2px', display: 'block' }}>Learning Rate</label>
-              <input type="number" value={learningRate} onChange={e => setLearningRate(Number(e.target.value))} step={0.0001} min={0.0001} max={0.1}
+              <label htmlFor="cloud-train-lr" style={{ color: '#94a3b8', fontSize: '10px', marginBottom: '2px', display: 'block' }}>Learning Rate</label>
+              <input id="cloud-train-lr" type="number" value={learningRate} onChange={e => setLearningRate(Number(e.target.value))} step={0.0001} min={0.0001} max={0.1}
                 style={{ width: '100%', padding: '6px', backgroundColor: '#0f3460', border: '1px solid #1a3a5c', borderRadius: '4px', color: 'white', fontSize: '11px' }}
               />
             </div>
           </div>
 
           <button
+            type="button"
             onClick={handleSubmitTraining}
             disabled={layers.length === 0 || !datasetInfo}
             style={{
@@ -394,6 +484,7 @@ export default function CloudPanel() {
                     </span>
                     {task.status === 'running' && (
                       <button 
+                        type="button"
                         onClick={() => stopTask(task.id)}
                         style={{ 
                           padding: '2px 6px', 
@@ -412,13 +503,7 @@ export default function CloudPanel() {
                   </div>
                 </div>
 
-                {task.metrics.length > 0 && (
-                  <div style={{ fontSize: '10px', color: '#94a3b8' }}>
-                    Loss: <span style={{ color: 'white', fontFamily: 'monospace' }}>{task.metrics[task.metrics.length - 1].loss.toFixed(4)}</span>
-                    {' \u00b7 '}
-                    Acc: <span style={{ color: '#10b981', fontFamily: 'monospace' }}>{(task.metrics[task.metrics.length - 1].accuracy * 100).toFixed(1)}%</span>
-                  </div>
-                )}
+                <CloudTaskMetricSummary metrics={task.metrics} />
               </div>
             ))}
           </div>

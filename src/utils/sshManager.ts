@@ -1,24 +1,12 @@
 import type { SSHConfig } from '@/types/cloud';
+import { sanitizePersistedSSHConfigs, stripSSHSecrets } from '@/utils/sshCredentialPolicy';
 
 const STORAGE_KEY = 'neurobricks_ssh_configs';
 
 /**
- * 简单的 Base64 编码（用于密码混淆，非强加密）
- */
-function encodePassword(password: string): string {
-  return btoa(password);
-}
-
-/**
- * 简单的 Base64 解码
- */
-function decodePassword(encoded: string): string {
-  return atob(encoded);
-}
-
-/**
  * 从 localStorage 加载 SSH 配置列表
- * @returns SSH 配置数组，解析失败返回空数组
+ * 旧版本可能在此 key 中保存过 Base64 密码；读取时立即脱敏回写，
+ * 保留服务器元数据并要求用户为当前会话重新输入凭据。
  */
 export async function loadSSHConfigs(): Promise<SSHConfig[]> {
   try {
@@ -27,32 +15,25 @@ export async function loadSSHConfigs(): Promise<SSHConfig[]> {
       return [];
     }
 
-    const configs = JSON.parse(stored) as SSHConfig[];
-
-    // 解码密码字段（如果存在）
-    return configs.map(config => ({
-      ...config,
-      password: config.password ? decodePassword(config.password) : undefined,
-    }));
+    const configs = sanitizePersistedSSHConfigs(JSON.parse(stored));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(configs));
+    return configs;
   } catch (error) {
     console.error('Failed to load SSH configs:', error);
+    // A malformed legacy record cannot be sanitized safely. Remove it instead
+    // of leaving potentially recoverable credentials in browser persistence.
+    localStorage.removeItem(STORAGE_KEY);
     return [];
   }
 }
 
 /**
- * 保存 SSH 配置列表到 localStorage
+ * 保存不含认证秘密的 SSH 配置列表到 localStorage
  * @param configs - SSH 配置数组
  */
 export async function saveSSHConfigs(configs: SSHConfig[]): Promise<void> {
   try {
-    // 编码密码字段（如果存在）
-    const encodedConfigs = configs.map(config => ({
-      ...config,
-      password: config.password ? encodePassword(config.password) : undefined,
-    }));
-
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(encodedConfigs));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(configs.map(stripSSHSecrets)));
   } catch (error) {
     console.error('Failed to save SSH configs:', error);
     throw error;

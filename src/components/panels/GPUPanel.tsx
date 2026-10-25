@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useGPUStore } from '@/stores/useGPUStore';
 import type { GPUInfo } from '@/types/gpu';
+import {
+  isNativeDesktopRuntime,
+  queryNativeTrainingEnvironment,
+  runtimeSourceLabel,
+} from '@/utils/trainingDevice';
 
 // Tauri API 动态导入（不使用 isTauri 守卫，直接 try/catch）
 
@@ -137,21 +142,31 @@ export default function GPUPanel() {
   const selectedDevice = useGPUStore(state => state.selectedDevice);
   const selectDevice = useGPUStore(state => state.selectDevice);
   const setDevices = useGPUStore(state => state.setDevices);
+  const runtimeInfo = useGPUStore(state => state.runtimeInfo);
+  const runtimeError = useGPUStore(state => state.runtimeError);
+  const setRuntimeChecking = useGPUStore(state => state.setRuntimeChecking);
+  const setRuntimeInfo = useGPUStore(state => state.setRuntimeInfo);
+  const setRuntimeError = useGPUStore(state => state.setRuntimeError);
 
   const [detecting, setDetecting] = useState(true);
 
   // 检测设备函数（可复用）
   const handleDetect = async () => {
     setDetecting(true);
+    setRuntimeChecking(true);
 
     try {
-      const { invoke } = await import('@tauri-apps/api/tauri');
-      const deviceList = await invoke<GPUInfo[]>('detect_devices');
+      const result = await queryNativeTrainingEnvironment();
+      const deviceList = result.devices;
       setDevices(deviceList);
+      setRuntimeInfo(result.runtimeInfo);
 
       if (deviceList.length > 0) {
-        const gpuDevice = deviceList.find(d => d.available && !d.deviceName.includes('CPU'));
-        const defaultDevice = gpuDevice || deviceList[0];
+        const gpuDevice = result.runtimeInfo.cudaAvailable
+          ? deviceList.find(d => d.available && d.category === 'discrete' && /nvidia|geforce|rtx|gtx/i.test(d.deviceName))
+          : undefined;
+        const cpuDevice = deviceList.find(d => d.category === 'cpu' || d.deviceName.startsWith('CPU'));
+        const defaultDevice = gpuDevice || cpuDevice || deviceList[0];
         selectDevice(defaultDevice.deviceName);
       }
     } catch (error) {
@@ -160,6 +175,11 @@ export default function GPUPanel() {
       const browserDevices = detectBrowserDevices();
       setDevices(browserDevices);
       if (browserDevices.length > 0) selectDevice(browserDevices[0].deviceName);
+      if (isNativeDesktopRuntime()) {
+        setRuntimeError(error instanceof Error ? error.message : String(error));
+      } else {
+        setRuntimeChecking(false);
+      }
     }
 
     setDetecting(false);
@@ -222,6 +242,32 @@ export default function GPUPanel() {
       </div>
 
       <div style={{ flex: 1, overflow: 'auto' }}>
+        {isNativeDesktopRuntime() && (
+          <div style={{
+            marginBottom: '10px',
+            padding: '10px',
+            borderRadius: '6px',
+            border: `1px solid ${runtimeInfo?.available ? '#10b981' : '#ef4444'}`,
+            backgroundColor: runtimeInfo?.available ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+            color: '#e2e8f0',
+            fontSize: '11px',
+            lineHeight: 1.55,
+          }}>
+            {runtimeInfo ? (
+              <>
+                <strong>{runtimeSourceLabel(runtimeInfo.source)}</strong>
+                <div>Python {runtimeInfo.pythonVersion} · PyTorch {runtimeInfo.torchVersion}</div>
+                <div>CUDA：{runtimeInfo.cudaAvailable
+                  ? `可用${runtimeInfo.cudaDeviceName ? ` · ${runtimeInfo.cudaDeviceName}` : ''}`
+                  : '不可用，将使用 CPU'}</div>
+                <div>CSV 回归：{runtimeInfo.csvRegressionAvailable ? '可用' : '依赖缺失'}</div>
+                {runtimeInfo.issues.map(issue => <div key={issue} style={{ color: '#fbbf24' }}>提示：{issue}</div>)}
+              </>
+            ) : (
+              <strong>训练运行时不可用：{runtimeError ?? '正在检查…'}</strong>
+            )}
+          </div>
+        )}
         {detecting ? (
           <div style={{ color: '#94a3b8', fontSize: '12px', textAlign: 'center', padding: '20px' }}>
             🔍 正在检测设备...
@@ -235,17 +281,20 @@ export default function GPUPanel() {
             {devices.map(device => {
               const deviceType = getDeviceType(device);
               const isSelected = device.deviceName === selectedDevice;
+              const isCudaHardware = deviceType === 'CUDA';
+              const trainingUsable = deviceType === 'CPU' || (isCudaHardware && Boolean(runtimeInfo?.cudaAvailable));
 
               return (
                 <div
                   key={device.deviceName}
-                  onClick={() => selectDevice(device.deviceName)}
+                  onClick={() => trainingUsable && selectDevice(device.deviceName)}
                   style={{
                     padding: '12px',
                     backgroundColor: isSelected ? '#1e40af' : '#0f3460',
                     border: isSelected ? '2px solid #3b82f6' : '1px solid #1a3a5c',
                     borderRadius: '6px',
-                    cursor: 'pointer',
+                    cursor: trainingUsable ? 'pointer' : 'not-allowed',
+                    opacity: trainingUsable ? 1 : 0.58,
                     transition: 'all 0.2s ease',
                   }}
                   onMouseEnter={(e) => {
@@ -264,6 +313,9 @@ export default function GPUPanel() {
                       <div style={{ color: '#94a3b8', fontSize: '11px' }}>
                         {getTypeLabel(deviceType)}{device.cudaVersion ? ` · CUDA ${device.cudaVersion}` : ''}
                       </div>
+                      {!trainingUsable && isCudaHardware && (
+                        <div style={{ color: '#fbbf24', fontSize: '10px' }}>训练器尚未确认 CUDA 可用</div>
+                      )}
                     </div>
                     {isSelected && (
                       <div
@@ -353,6 +405,7 @@ export default function GPUPanel() {
 
       {/* 重新检测按钮 */}
       <button
+        type="button"
         onClick={handleDetect}
         disabled={detecting}
         style={{

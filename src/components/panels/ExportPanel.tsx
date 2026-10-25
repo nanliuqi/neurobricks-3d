@@ -1,8 +1,24 @@
 import { useState } from 'react';
 import { useLayerStore } from '@/stores/useLayerStore';
 import { useTrainingStore } from '@/stores/useTrainingStore';
+import { useDatasetStore } from '@/stores/useDatasetStore';
+import { TRAIN_CONFIG_STORAGE_KEY, type TrainConfig } from '@/types/training';
 import { generatePyTorchCode, generateKerasCode } from '@/utils/codeGenerator';
+import {
+  generateModelPy,
+  generateTrainPy,
+  generateRequirements,
+  generateVerifyPackagePy,
+  generateReadmeMd,
+  generateMetricsCsv,
+  selectLatestCompletedAttemptForLayers,
+  type ExperimentConfig,
+} from '@/utils/experimentExport';
 import { toast } from '@/components/ui/Toast';
+import { useExperimentStore, verifyExperimentLedgerAudit } from '@/stores/useExperimentStore';
+import type { ConclusionTrust } from '@/types/experiment';
+import { maxConclusionTrust, projectEffectiveClaimTrust } from '@/utils/claimProtocol';
+import { redactLocalPaths } from '@/utils/exportRedaction';
 
 /** 浏览器端下载文件 */
 function browserDownload(filename: string, content: string, mimeType = 'text/plain') {
@@ -35,10 +51,279 @@ async function saveFile(filename: string, content: string, mimeType = 'text/plai
 
 export default function ExportPanel() {
   const layers = useLayerStore(state => state.layers);
+  const totalParams = useLayerStore(state => state.totalParams);
+  const towerName = useLayerStore(state => state.towerName);
   const metrics = useTrainingStore(state => state.metrics);
+  const trainingStatus = useTrainingStore(state => state.status);
+  const executionMode = useTrainingStore(state => state.executionMode);
+  const logs = useTrainingStore(state => state.logs);
+  const lastRunSnapshot = useTrainingStore(state => state.lastRunSnapshot);
+  const trainingArtifacts = useTrainingStore(state => state.artifacts);
+  const lastTrainConfig = useTrainingStore(state => state.lastTrainConfig);
+  const lastAttemptId = useTrainingStore(state => state.lastAttemptId);
+  const datasetInfo = useDatasetStore(state => state.datasetInfo);
+  const ledger = useExperimentStore(state => state.ledger);
+
+  // 只有已完成的原生训练指标才属于可复现实验结果。浏览器演示曲线和中断训练的
+  // 局部指标仍可在界面排障，但不能进入 CSV 或实验包冒充真实结果；训练完成后若
+  // 用户修改了网络，也不能把旧权重/指标错误归到当前结构名下。
+  const currentArchitectureMatchesRun = lastRunSnapshot !== null
+    && lastRunSnapshot.totalParams === totalParams
+    && JSON.stringify(layers.map(layer => ({ type: layer.type, params: layer.params })))
+      === JSON.stringify(lastRunSnapshot.layers);
+  const persistedAttempt = selectLatestCompletedAttemptForLayers(ledger, layers, lastAttemptId);
+  const hasLegacyCompletedMetrics = trainingStatus === 'done'
+    && executionMode === 'native'
+    && currentArchitectureMatchesRun
+    && metrics.length > 0;
+  const hasLegacyMatchingNativeResult = trainingStatus === 'done'
+    && executionMode === 'native'
+    && currentArchitectureMatchesRun;
+  const hasMatchingNativeResult = Boolean(persistedAttempt) || hasLegacyMatchingNativeResult;
+  const resultArtifacts = persistedAttempt?.artifacts ?? trainingArtifacts;
+  const exportableMetrics = persistedAttempt?.metrics ?? (hasLegacyCompletedMetrics ? metrics : []);
+  const hasRealCompletedMetrics = exportableMetrics.length > 0;
+  const exportTrainConfig = persistedAttempt?.config ?? lastTrainConfig;
+  const exportAttemptId = persistedAttempt?.id ?? (hasLegacyMatchingNativeResult ? lastAttemptId : null);
+  // 产物按 Attempt 隔离持久化；关闭训练卡片或完成后续训练，都不应覆盖历史权重。
+  const canExportWeights = Boolean(exportAttemptId) && resultArtifacts?.weights === true;
+  const canExportFullModel = Boolean(exportAttemptId) && resultArtifacts?.fullModel === true;
+  const canExportNumpy = Boolean(exportAttemptId) && resultArtifacts?.numpy === true;
+  const resultMode = hasRealCompletedMetrics
+      ? 'native' as const
+      : trainingStatus === 'done' && executionMode === 'simulation' && metrics.length > 0
+        ? 'simulation' as const
+      : 'none' as const;
 
   const [previewCode, setPreviewCode] = useState<string | null>(null);
   const [previewLang, setPreviewLang] = useState<'python' | 'keras' | null>(null);
+  const [exportingPkg, setExportingPkg] = useState(false);
+
+  /** 清理文件名中 Windows 不允许的字符（提前声明避免 TDZ） */
+  const sanitizeFilename = (name: string): string => {
+    const cleaned = name
+      .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
+      .replace(/[.\s]+$/, '')
+      .replace(/^(con|prn|aux|nul|com\d|lpt\d)$/i, '$&_');
+    return cleaned || 'untitled';
+  };
+
+  /** 从 localStorage 读用户当前训练配置（QuickTrain 持久化的 9 字段）作为实验包默认超参 */
+  const readCurrentTrainConfig = (): ExperimentConfig => {
+    const defaults: ExperimentConfig = {
+      epochs: 5,
+      batchSize: 32,
+      learningRate: 0.001,
+      optimizer: 'adam',
+      momentum: 0.9,
+      lrScheduler: 'none',
+      seed: 42,
+      valSplit: 0.2,
+      weightDecay: 0,
+      dataset: 'mnist',
+    };
+    // 实验包包含本次真实指标时，超参数与数据集也必须来自同一次运行快照，
+    // 不能读取用户训练后可能改动的当前控件/数据集。
+    if (hasMatchingNativeResult && exportTrainConfig) {
+      return {
+        epochs: exportTrainConfig.epochs,
+        batchSize: exportTrainConfig.batchSize,
+        learningRate: exportTrainConfig.learningRate,
+        optimizer: exportTrainConfig.optimizer ?? defaults.optimizer,
+        momentum: exportTrainConfig.momentum ?? defaults.momentum,
+        lrScheduler: exportTrainConfig.lrScheduler ?? defaults.lrScheduler,
+        seed: exportTrainConfig.seed ?? defaults.seed,
+        valSplit: exportTrainConfig.valSplit ?? defaults.valSplit,
+        weightDecay: exportTrainConfig.weightDecay ?? defaults.weightDecay,
+        dataset: exportTrainConfig.dataset,
+      };
+    }
+    try {
+      const raw = localStorage.getItem(TRAIN_CONFIG_STORAGE_KEY);
+      if (!raw) return defaults;
+      const s = JSON.parse(raw) as Record<string, unknown>;
+      const num = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
+      const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+      const lrExponent = clamp(num(s.lrExponent, -3), -6, 0);
+      return {
+        epochs: Math.floor(clamp(num(s.epochs, defaults.epochs), 1, 50)),
+        batchSize: Math.floor(clamp(num(s.batchSize, defaults.batchSize), 1, 512)),
+        learningRate: Math.pow(10, lrExponent),
+        optimizer: s.optimizer === 'sgd' || s.optimizer === 'adamw' || s.optimizer === 'adam' ? s.optimizer : defaults.optimizer,
+        momentum: clamp(num(s.momentum, defaults.momentum), 0, 0.99),
+        lrScheduler: s.lrScheduler === 'multistep' || s.lrScheduler === 'cosine' || s.lrScheduler === 'none' ? s.lrScheduler : defaults.lrScheduler,
+        seed: Math.max(0, Math.floor(num(s.seed, defaults.seed))),
+        valSplit: (() => {
+          const value = clamp(num(s.valSplit, defaults.valSplit), 0, 0.5);
+          return value > 0 ? value : defaults.valSplit;
+        })(),
+        weightDecay: clamp(num(s.weightDecay, defaults.weightDecay), 0, 1),
+        dataset: datasetInfo?.type === 'cifar10' ? 'cifar10' : 'mnist',
+      };
+    } catch {
+      return defaults;
+    }
+  };
+
+  const handleExportExperiment = async () => {
+    if (layers.length === 0) return;
+    if (!persistedAttempt) {
+      toast.warning('实验复现包必须绑定已完成的受控 Attempt；仅导出网络代码请使用下方 PyTorch/Keras 代码导出。');
+      return;
+    }
+    if (!persistedAttempt.artifacts?.weights || !persistedAttempt.provenance.preprocessingParameters) {
+      toast.warning('该 Attempt 缺少原始权重或冻结预处理协议，不能生成可核验的复现包。');
+      return;
+    }
+    const packageDataset = hasMatchingNativeResult
+      ? exportTrainConfig?.dataset
+      : datasetInfo?.type;
+    if (packageDataset && packageDataset !== 'mnist' && packageDataset !== 'cifar10') {
+      toast.warning('独立实验包当前仅支持 MNIST / CIFAR-10；自定义数据集请导出模型代码并自行接入数据加载。');
+      return;
+    }
+    setExportingPkg(true);
+    try {
+      const { open } = await import('@tauri-apps/api/dialog');
+      const { invoke } = await import('@tauri-apps/api/tauri');
+
+      const safeName = sanitizeFilename(towerName || 'neurobricks-experiment');
+      const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-');
+      const dirPath = await open({
+        directory: true,
+        title: '选择实验包保存位置（将创建子目录）',
+      });
+      if (!dirPath || Array.isArray(dirPath)) return;
+
+      const config = readCurrentTrainConfig();
+      if (!(config.valSplit > 0 && config.valSplit <= 0.5)) {
+        toast.warning('该历史配置没有独立验证集，导出脚本将触碰封存测试集；已拒绝生成伪复现实验包。');
+        return;
+      }
+      useExperimentStore.getState().appendEvent('attempt', exportAttemptId ?? 'legacy-export', 'experiment_package_export_requested', {
+        format: 'neurobricks-experiment-package-v1',
+      });
+      await verifyExperimentLedgerAudit();
+      const currentLedger = useExperimentStore.getState().ledger;
+      const auditPersistence = useExperimentStore.getState().auditPersistence;
+      const attempt = currentLedger.attempts.find(item => item.id === exportAttemptId) ?? null;
+      const experiment = attempt
+        ? currentLedger.experiments.find(item => item.id === attempt.experimentId) ?? null
+        : null;
+      const study = experiment
+        ? currentLedger.studies.find(item => item.id === experiment.studyId) ?? null
+        : null;
+       const claims = attempt ? currentLedger.claims.filter(item => item.attemptId === attempt.id) : [];
+       // 统一投影：实验包最高等级只从 effectiveTrust 中选择（协议层安全排序），
+       // 本地不再维护 trustRank；未知枚举与不一致存档绝不进入等级比较。
+       const claimProjections = claims.map(claim => (study
+         ? projectEffectiveClaimTrust({ study, claim, attempt, events: currentLedger.events, auditPersistence })
+         : null));
+       const projectedClaims = claims.map((claim, index) => ({
+         ...claim,
+         archivedConclusionTrust: claim.conclusionTrust,
+         conclusionTrust: claimProjections[index]?.effectiveTrust ?? ('not_evaluated' as ConclusionTrust),
+       }));
+       const conclusionTrust = claimProjections.reduce<ConclusionTrust>(
+         (best, projection) => (projection ? maxConclusionTrust(best, projection.effectiveTrust) : best),
+         'not_evaluated',
+       );
+       // 异常/阻断计数：合法未裁决（not_adjudicated）不算异常；档案阻断单独计数。
+       const isStructural = (reasons: readonly string[]) => reasons.some(
+         reason => reason !== 'not_adjudicated' && reason !== 'audit_persistence_not_healthy' && reason !== 'post_hoc',
+       );
+       const claimAnomalyCount = claimProjections.filter(
+         projection => projection !== null && isStructural(projection.reasons),
+       ).length;
+       const claimPersistenceBlockedCount = claimProjections.filter(
+         projection => projection !== null
+           && !isStructural(projection.reasons)
+           && projection.reasons.includes('audit_persistence_not_healthy'),
+       ).length;
+      const trustContext = {
+        attemptId: attempt?.id ?? null,
+        executionTrust: attempt?.provenance.executionTrust ?? ('unverified' as const),
+        conclusionTrust,
+        modelWeightsHash: attempt?.provenance.modelWeightsHash ?? null,
+        auditPersistence,
+        claimCount: claims.length,
+        claimAnomalyCount,
+        claimPersistenceBlockedCount,
+      };
+      const modelPy = generateModelPy(layers, towerName || '未命名网络');
+      const trainPy = generateTrainPy(config);
+      const requirements = generateRequirements();
+      const verifyPackagePy = generateVerifyPackagePy();
+      const readme = generateReadmeMd(
+        towerName || '未命名网络',
+        layers,
+        totalParams,
+        config,
+        exportableMetrics,
+        resultMode,
+        trustContext,
+      );
+      const metricsCsv = generateMetricsCsv(exportableMetrics);
+      const redactConfig = (value: TrainConfig) => {
+        const { dataPath: _privatePath, ...safe } = value;
+        return { ...safe, dataPathIncluded: false };
+      };
+      const relatedIds = new Set([attempt?.id, experiment?.id, study?.id, ...claims.map(claim => claim.id)].filter(Boolean));
+      const manifestJson = JSON.stringify({
+        protocolVersion: 1,
+        ledgerId: currentLedger.ledgerId,
+        manifestType: 'neurobricks-experiment-package-v1',
+        exportedAt: new Date().toISOString(),
+        auditPersistence,
+        threatModel: 'export is a one-way delivery format; reruns outside NeuroBricks are external/unverified',
+        study,
+        experiment: experiment ? { ...experiment, config: redactConfig(experiment.config) } : null,
+        attempt: attempt ? { ...attempt, artifacts: undefined, config: redactConfig(attempt.config) } : null,
+        sourceRunArtifacts: attempt?.artifacts ?? null,
+         claims: projectedClaims,
+        events: redactLocalPaths(
+          currentLedger.events.filter(event => relatedIds.has(event.entityId)),
+          [attempt?.config.dataPath, experiment?.config.dataPath].filter((value): value is string => Boolean(value)),
+        ),
+        trust: trustContext,
+      }, null, 2);
+      const preprocessingJson = JSON.stringify({
+        protocolVersion: 1,
+        attemptId: attempt!.id,
+        fittedPreprocessingHash: attempt!.provenance.preprocessingHash,
+        parameters: attempt!.provenance.preprocessingParameters,
+      }, null, 2);
+
+      await invoke('export_experiment_package', {
+        dirPath: `${dirPath}${dirPath.toString().endsWith('\\') ? '' : '\\'}${safeName}_${ts}`,
+        modelPy,
+        trainPy,
+        requirementsTxt: requirements,
+        readmeMd: readme,
+        metricsCsv,
+        manifestJson,
+        attemptId: attempt!.id,
+        preprocessingJson,
+        verifyPackagePy,
+      });
+
+      useExperimentStore.getState().appendEvent('attempt', attempt?.id ?? 'legacy-export', 'experiment_package_export_completed', {
+        format: 'neurobricks-experiment-package-v1',
+        auditPersistence,
+      });
+      await verifyExperimentLedgerAudit();
+
+      toast.success(`实验复现包导出成功\n\n目录：${safeName}_${ts}\n包含代码、原始权重、冻结预处理、清单与${metricsCsv ? '已完成指标' : '空指标说明'}`);
+    } catch (error) {
+      console.error('Failed to export experiment package:', error);
+      useExperimentStore.getState().appendEvent('attempt', exportAttemptId ?? 'legacy-export', 'experiment_package_export_failed', {
+        message: error instanceof Error ? error.message : String(error),
+      });
+      toast.error('实验包导出失败：' + (error as Error).message);
+    } finally {
+      setExportingPkg(false);
+    }
+  };
 
   const handlePreviewPyTorch = () => {
     const code = generatePyTorchCode(layers);
@@ -72,6 +357,10 @@ export default function ExportPanel() {
 
   const handleExportWeights = async () => {
     try {
+      if (!canExportWeights) {
+        toast.warning('当前网络没有可用的 PyTorch 权重产物');
+        return;
+      }
       const { save } = await import('@tauri-apps/api/dialog');
       const { invoke } = await import('@tauri-apps/api/tauri');
       const filePath = await save({
@@ -79,7 +368,7 @@ export default function ExportPanel() {
         defaultPath: 'model_weights.pth',
       });
       if (!filePath) return;
-      await invoke('export_model_weights', { path: filePath });
+      await invoke('export_model_weights', { path: filePath, attemptId: exportAttemptId });
       toast.success('PyTorch 权重导出成功\n\n使用方法：\nmodel.load_state_dict(torch.load("model_weights.pth"))');
     } catch (error) {
       console.error('Failed to export weights:', error);
@@ -89,6 +378,10 @@ export default function ExportPanel() {
 
   const handleExportFullModel = async () => {
     try {
+      if (!canExportFullModel) {
+        toast.warning('当前网络没有可用的完整模型产物');
+        return;
+      }
       const { save } = await import('@tauri-apps/api/dialog');
       const { invoke } = await import('@tauri-apps/api/tauri');
       const filePath = await save({
@@ -96,7 +389,7 @@ export default function ExportPanel() {
         defaultPath: 'model_full.pt',
       });
       if (!filePath) return;
-      await invoke('export_full_model', { path: filePath });
+      await invoke('export_full_model', { path: filePath, attemptId: exportAttemptId });
       toast.success('完整模型导出成功\n\n使用方法：\nmodel = torch.load("model_full.pt")\nmodel.eval()');
     } catch (error) {
       console.error('Failed to export full model:', error);
@@ -106,6 +399,10 @@ export default function ExportPanel() {
 
   const handleExportNumpy = async () => {
     try {
+      if (!canExportNumpy) {
+        toast.warning('当前训练没有成功生成 NumPy 权重');
+        return;
+      }
       const { save } = await import('@tauri-apps/api/dialog');
       const { invoke } = await import('@tauri-apps/api/tauri');
       const filePath = await save({
@@ -113,7 +410,7 @@ export default function ExportPanel() {
         defaultPath: 'model_weights.npz',
       });
       if (!filePath) return;
-      await invoke('export_numpy_weights', { path: filePath });
+      await invoke('export_numpy_weights', { path: filePath, attemptId: exportAttemptId });
       toast.success('NumPy 权重导出成功\n\n使用方法：\nimport numpy as np\ndata = np.load("model_weights.npz")\nfor key in data.files:\n    print(key, data[key].shape)');
     } catch (error) {
       console.error('Failed to export numpy weights:', error);
@@ -123,12 +420,14 @@ export default function ExportPanel() {
 
   const handleExportLogs = async () => {
     try {
-      if (!metrics || metrics.length === 0) {
-        toast.warning('暂无训练日志可导出');
+      if (!hasRealCompletedMetrics) {
+        toast.warning(executionMode === 'simulation'
+          ? '浏览器演示指标不能作为真实训练日志导出'
+          : '暂无已完成的真实训练指标可导出');
         return;
       }
-      const headers = Object.keys(metrics[0]).join(',');
-      const rows = metrics.map(m => Object.values(m).join(','));
+      const headers = Object.keys(exportableMetrics[0]).join(',');
+      const rows = exportableMetrics.map(m => Object.values(m).join(','));
       const csv = [headers, ...rows].join('\n');
       await saveFile('training_log.csv', csv, 'text/csv');
     } catch (error) {
@@ -139,7 +438,6 @@ export default function ExportPanel() {
 
   const handleExportLogsTxt = async () => {
     try {
-      const logs = useTrainingStore.getState().logs;
       if (!logs || logs.length === 0) {
         toast.warning('暂无训练日志可导出');
         return;
@@ -156,20 +454,9 @@ export default function ExportPanel() {
     }
   };
 
-  const handleExportChart = async () => {
-    toast.info('曲线图导出功能开发中');
-  };
-
   // --- 项目保存 / 加载 ---
 
-  /** 清理文件名中 Windows 不允许的字符（非法字符 / 尾部点空格 / 保留设备名） */
-  const sanitizeFilename = (name: string): string => {
-    const cleaned = name
-      .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
-      .replace(/[.\s]+$/, '')
-      .replace(/^(con|prn|aux|nul|com\d|lpt\d)$/i, '$&_');
-    return cleaned || 'untitled';
-  };
+  // sanitizeFilename 已提前到组件顶部声明
 
   const handleSaveProject = async () => {
     try {
@@ -284,6 +571,7 @@ export default function ExportPanel() {
 
         <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
           <button
+            type="button"
             onClick={handleSaveProject}
             disabled={layers.length === 0}
             style={{
@@ -301,6 +589,7 @@ export default function ExportPanel() {
             💾 保存项目
           </button>
           <button
+            type="button"
             onClick={handleLoadProject}
             style={{
               flex: 1,
@@ -318,7 +607,21 @@ export default function ExportPanel() {
           </button>
         </div>
 
-        <button onClick={handlePreviewPyTorch} disabled={layers.length === 0}
+        <button type="button" onClick={handleExportExperiment} disabled={!persistedAttempt || exportingPkg}
+          data-testid="export-experiment-btn"
+          title={!persistedAttempt ? '请先完成一次受控训练；仅导出代码请使用下方按钮' : undefined}
+          style={{ padding: '12px', backgroundColor: !persistedAttempt || exportingPkg ? '#475569' : '#be185d', color: 'white', border: 'none', borderRadius: '6px', cursor: !persistedAttempt || exportingPkg ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 600, textAlign: 'left', display: 'flex', alignItems: 'center', gap: '8px' }}
+          onMouseEnter={e => { if (persistedAttempt && !exportingPkg) e.currentTarget.style.backgroundColor = '#9d174d'; }}
+          onMouseLeave={e => { if (layers.length > 0 && !exportingPkg) e.currentTarget.style.backgroundColor = '#be185d'; }}
+        >
+          <span style={{ fontSize: '16px' }}>🎓</span>
+          <div>
+            <div>{exportingPkg ? '导出中...' : '导出实验复现包'}</div>
+            <div style={{ fontSize: '10px', fontWeight: 400, opacity: 0.7 }}>代码 + 原始权重 + 预处理 + 哈希；外部重跑单独留档</div>
+          </div>
+        </button>
+
+        <button type="button" onClick={handlePreviewPyTorch} disabled={layers.length === 0}
           style={{ padding: '12px', backgroundColor: layers.length === 0 ? '#475569' : '#1e40af', color: 'white', border: 'none', borderRadius: '6px', cursor: layers.length === 0 ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 600, textAlign: 'left', display: 'flex', alignItems: 'center', gap: '8px' }}
           onMouseEnter={e => { if (layers.length > 0) e.currentTarget.style.backgroundColor = '#1e3a8a'; }}
           onMouseLeave={e => { if (layers.length > 0) e.currentTarget.style.backgroundColor = '#1e40af'; }}
@@ -326,7 +629,7 @@ export default function ExportPanel() {
           <span style={{ fontSize: '16px' }}>🐍</span><span>导出 PyTorch 代码</span>
         </button>
 
-        <button onClick={handlePreviewKeras} disabled={layers.length === 0}
+        <button type="button" onClick={handlePreviewKeras} disabled={layers.length === 0}
           style={{ padding: '12px', backgroundColor: layers.length === 0 ? '#475569' : '#047857', color: 'white', border: 'none', borderRadius: '6px', cursor: layers.length === 0 ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 600, textAlign: 'left', display: 'flex', alignItems: 'center', gap: '8px' }}
           onMouseEnter={e => { if (layers.length > 0) e.currentTarget.style.backgroundColor = '#065f46'; }}
           onMouseLeave={e => { if (layers.length > 0) e.currentTarget.style.backgroundColor = '#047857'; }}
@@ -334,8 +637,9 @@ export default function ExportPanel() {
           <span style={{ fontSize: '16px' }}>🔧</span><span>导出 Keras 代码</span>
         </button>
 
-        <button onClick={handleExportWeights} disabled={layers.length === 0}
-          style={{ padding: '10px 12px', backgroundColor: layers.length === 0 ? '#475569' : '#7c3aed', color: 'white', border: 'none', borderRadius: '6px', cursor: layers.length === 0 ? 'not-allowed' : 'pointer', fontSize: '12px', fontWeight: 600, textAlign: 'left', display: 'flex', alignItems: 'center', gap: '8px' }}
+        <button type="button" onClick={handleExportWeights} disabled={!canExportWeights}
+          title={!canExportWeights ? '请先完成当前网络的真实训练并确认权重保存成功' : undefined}
+          style={{ padding: '10px 12px', backgroundColor: !canExportWeights ? '#475569' : '#7c3aed', color: 'white', border: 'none', borderRadius: '6px', cursor: !canExportWeights ? 'not-allowed' : 'pointer', fontSize: '12px', fontWeight: 600, textAlign: 'left', display: 'flex', alignItems: 'center', gap: '8px' }}
         >
           <span style={{ fontSize: '14px' }}>⚖️</span>
           <div>
@@ -344,8 +648,9 @@ export default function ExportPanel() {
           </div>
         </button>
 
-        <button onClick={handleExportFullModel} disabled={layers.length === 0}
-          style={{ padding: '10px 12px', backgroundColor: layers.length === 0 ? '#475569' : '#6d28d9', color: 'white', border: 'none', borderRadius: '6px', cursor: layers.length === 0 ? 'not-allowed' : 'pointer', fontSize: '12px', fontWeight: 600, textAlign: 'left', display: 'flex', alignItems: 'center', gap: '8px' }}
+        <button type="button" onClick={handleExportFullModel} disabled={!canExportFullModel}
+          title={!canExportFullModel ? '请先完成当前网络的真实训练并确认完整模型保存成功' : undefined}
+          style={{ padding: '10px 12px', backgroundColor: !canExportFullModel ? '#475569' : '#6d28d9', color: 'white', border: 'none', borderRadius: '6px', cursor: !canExportFullModel ? 'not-allowed' : 'pointer', fontSize: '12px', fontWeight: 600, textAlign: 'left', display: 'flex', alignItems: 'center', gap: '8px' }}
         >
           <span style={{ fontSize: '14px' }}>📦</span>
           <div>
@@ -354,8 +659,9 @@ export default function ExportPanel() {
           </div>
         </button>
 
-        <button onClick={handleExportNumpy} disabled={layers.length === 0}
-          style={{ padding: '10px 12px', backgroundColor: layers.length === 0 ? '#475569' : '#5b21b6', color: 'white', border: 'none', borderRadius: '6px', cursor: layers.length === 0 ? 'not-allowed' : 'pointer', fontSize: '12px', fontWeight: 600, textAlign: 'left', display: 'flex', alignItems: 'center', gap: '8px' }}
+        <button type="button" onClick={handleExportNumpy} disabled={!canExportNumpy}
+          title={!canExportNumpy ? '请先完成当前网络的真实训练并确认 NumPy 权重保存成功' : undefined}
+          style={{ padding: '10px 12px', backgroundColor: !canExportNumpy ? '#475569' : '#5b21b6', color: 'white', border: 'none', borderRadius: '6px', cursor: !canExportNumpy ? 'not-allowed' : 'pointer', fontSize: '12px', fontWeight: 600, textAlign: 'left', display: 'flex', alignItems: 'center', gap: '8px' }}
         >
           <span style={{ fontSize: '14px' }}>🔢</span>
           <div>
@@ -364,27 +670,23 @@ export default function ExportPanel() {
           </div>
         </button>
 
-        <button onClick={handleExportLogs} disabled={!metrics || metrics.length === 0}
-          style={{ padding: '12px', backgroundColor: !metrics || metrics.length === 0 ? '#475569' : '#ea580c', color: 'white', border: 'none', borderRadius: '6px', cursor: !metrics || metrics.length === 0 ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 600, textAlign: 'left', display: 'flex', alignItems: 'center', gap: '8px' }}
-          onMouseEnter={e => { if (metrics && metrics.length > 0) e.currentTarget.style.backgroundColor = '#c2410c'; }}
-          onMouseLeave={e => { if (metrics && metrics.length > 0) e.currentTarget.style.backgroundColor = '#ea580c'; }}
+        <button type="button" onClick={handleExportLogs} disabled={!hasRealCompletedMetrics}
+          title={!hasRealCompletedMetrics && executionMode === 'simulation' ? '浏览器演示指标不可作为真实实验数据导出' : undefined}
+          style={{ padding: '12px', backgroundColor: !hasRealCompletedMetrics ? '#475569' : '#ea580c', color: 'white', border: 'none', borderRadius: '6px', cursor: !hasRealCompletedMetrics ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 600, textAlign: 'left', display: 'flex', alignItems: 'center', gap: '8px' }}
+          onMouseEnter={e => { if (hasRealCompletedMetrics) e.currentTarget.style.backgroundColor = '#c2410c'; }}
+          onMouseLeave={e => { if (hasRealCompletedMetrics) e.currentTarget.style.backgroundColor = '#ea580c'; }}
         >
           <span style={{ fontSize: '16px' }}>📊</span><span>导出训练日志</span>
         </button>
 
-        <button onClick={handleExportLogsTxt} disabled={!metrics || metrics.length === 0}
-          style={{ padding: '12px', backgroundColor: !metrics || metrics.length === 0 ? '#475569' : '#d97706', color: 'white', border: 'none', borderRadius: '6px', cursor: !metrics || metrics.length === 0 ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 600, textAlign: 'left', display: 'flex', alignItems: 'center', gap: '8px' }}
-          onMouseEnter={e => { if (metrics && metrics.length > 0) e.currentTarget.style.backgroundColor = '#b45309'; }}
-          onMouseLeave={e => { if (metrics && metrics.length > 0) e.currentTarget.style.backgroundColor = '#d97706'; }}
+        <button type="button" onClick={handleExportLogsTxt} disabled={logs.length === 0}
+          style={{ padding: '12px', backgroundColor: logs.length === 0 ? '#475569' : '#d97706', color: 'white', border: 'none', borderRadius: '6px', cursor: logs.length === 0 ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 600, textAlign: 'left', display: 'flex', alignItems: 'center', gap: '8px' }}
+          onMouseEnter={e => { if (logs.length > 0) e.currentTarget.style.backgroundColor = '#b45309'; }}
+          onMouseLeave={e => { if (logs.length > 0) e.currentTarget.style.backgroundColor = '#d97706'; }}
         >
           <span style={{ fontSize: '16px' }}>📄</span><span>导出训练日志 (.txt)</span>
         </button>
 
-        <button onClick={handleExportChart} disabled={true}
-          style={{ padding: '12px', backgroundColor: '#475569', color: '#94a3b8', border: 'none', borderRadius: '6px', cursor: 'not-allowed', fontSize: '13px', fontWeight: 600, textAlign: 'left', display: 'flex', alignItems: 'center', gap: '8px' }}
-        >
-          <span style={{ fontSize: '16px' }}>📈</span><span>导出曲线图（开发中）</span>
-        </button>
       </div>
 
       {/* 代码预览区域 */}
@@ -401,6 +703,7 @@ export default function ExportPanel() {
             </span>
             <div style={{ display: 'flex', gap: '6px' }}>
               <button
+                type="button"
                 onClick={previewLang === 'python' ? handleSavePyTorch : handleSaveKeras}
                 style={{
                   padding: '4px 12px',
@@ -416,6 +719,7 @@ export default function ExportPanel() {
                 保存到文件
               </button>
               <button
+                type="button"
                 onClick={() => { setPreviewCode(null); setPreviewLang(null); }}
                 style={{
                   padding: '4px 12px',

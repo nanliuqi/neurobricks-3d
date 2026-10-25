@@ -1,224 +1,98 @@
-import { useState, useEffect } from 'react';
-import { useTrainingStore } from '../../stores/useTrainingStore';
+import { useEffect, useState, type CSSProperties } from 'react';
+import Alert from '@/components/ui/Alert';
+import Button from '@/components/ui/Button';
+import StatusBadge from '@/components/ui/StatusBadge';
+import { useTrainingStore } from '@/stores/useTrainingStore';
+import { stopTrainingRun } from '@/trainingRuntime';
+import { formatStrictMetricValue } from '@/utils/metricSeries';
+import {
+  clampProgress,
+  formatDuration,
+  projectLatestDiagnosticMetric,
+  projectTrainingStatus,
+} from '@/utils/trainingMonitorViewModel';
 
-export default function TrainProgress() {
-  const currentEpoch = useTrainingStore(state => state.currentEpoch);
-  const totalEpochs = useTrainingStore(state => state.totalEpochs);
-  const currentLoss = useTrainingStore(state => state.currentLoss);
-  const currentAccuracy = useTrainingStore(state => state.currentAccuracy);
-  const isTraining = useTrainingStore(state => state.isTraining);
-  const finalAccuracy = useTrainingStore(state => state.finalAccuracy);
-  const error = useTrainingStore(state => state.error);
-  const trainStartTime = useTrainingStore(state => state.trainStartTime);
-  const resetTraining = useTrainingStore(state => state.resetTraining);
+export interface TrainProgressProps {
+  className?: string;
+  style?: CSSProperties;
+}
 
-  // 时间追踪状态
+/** 底部训练条只负责高频运行反馈；可信结论必须回到 Attempt/Claim 档案查看。 */
+export default function TrainProgress({ className, style }: TrainProgressProps) {
+  const training = useTrainingStore();
   const [now, setNow] = useState(Date.now());
 
-  // 训练中每秒刷新时间
   useEffect(() => {
-    if (!isTraining) return;
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [isTraining]);
+    if (!training.isTraining) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [training.isTraining]);
 
-  // 计算进度百分比
-  const progressPercent = totalEpochs > 0 ? (currentEpoch / totalEpochs) * 100 : 0;
+  if (!training.isTraining && training.finalAccuracy === null && !training.error) return null;
 
-  // 计算已用时间和预计剩余时间
-  const elapsed = trainStartTime ? now - trainStartTime : 0;
-  const estimatedTotal = progressPercent > 5 ? elapsed / (progressPercent / 100) : 0;
-  const remaining = estimatedTotal > 0 ? estimatedTotal - elapsed : 0;
-
-  // 格式化时间
-  const formatTime = (ms: number) => {
-    const seconds = Math.floor(ms / 1000);
-    if (seconds < 60) return `${seconds}秒`;
-    const minutes = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${minutes}分${secs}秒`;
-  };
-
-  // 如果不在训练中且无最终结果且无错误，返回 null
-  if (!isTraining && finalAccuracy === null && !error) {
-    return null;
-  }
-
-  // 停止训练处理
-  const handleStopTraining = async () => {
-    try {
-      const { invoke } = await import('@tauri-apps/api/tauri');
-      await invoke('stop_training');
-    } catch {
-      // Tauri 不可用，直接重置
-    }
-    resetTraining();
-  };
-
-  // 重置训练状态
-  const handleReset = () => {
-    resetTraining();
-  };
+  const statusView = projectTrainingStatus(training.status);
+  const progress = clampProgress(training.currentEpoch, training.totalEpochs);
+  const elapsed = training.trainStartTime ? Math.max(0, now - training.trainStartTime) : null;
+  const estimatedTotal = elapsed !== null && progress > 5 ? elapsed / (progress / 100) : null;
+  const remaining = estimatedTotal !== null ? Math.max(0, estimatedTotal - elapsed!) : null;
+  const latestMetric = projectLatestDiagnosticMetric(training.metrics);
 
   return (
-    <div
-      style={{
-        height: '80px',
-        backgroundColor: '#16213e',
-        borderTop: '1px solid #0f3460',
-        display: 'flex',
-        alignItems: 'center',
-        padding: '0 16px',
-        gap: '16px',
-      }}
-    >
-      {/* 错误信息 */}
-      {error && (
-        <div
-          style={{
-            flex: 1,
-            backgroundColor: '#7f1d1d',
-            color: '#fecaca',
-            padding: '8px 12px',
-            borderRadius: '6px',
-            fontSize: '12px',
-            border: '1px solid #ef4444',
-          }}
-        >
-          ❌ {error}
-        </div>
+    <div className={['train-progress', 'train-progress--semantic', className].filter(Boolean).join(' ')} style={style}>
+      {training.error && (
+        <Alert tone="danger" title={statusView.label} className="train-progress__main">
+          {training.error}
+        </Alert>
       )}
 
-      {/* 训练中状态 */}
-      {isTraining && !error && (
+      {training.isTraining && (
         <>
-          {/* 进度条容器 */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            {/* 进度文本 */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-              <span style={{ color: '#94a3b8' }}>
-                Epoch {currentEpoch} / {totalEpochs}
-              </span>
-              <span style={{ color: 'white', fontWeight: 600 }}>
-                {progressPercent.toFixed(1)}%
-              </span>
+          <div className="train-progress__main train-progress__body">
+            <div className="train-progress__heading">
+              <StatusBadge tone={statusView.tone} label={statusView.label} />
+              <span>{training.status === 'starting' ? '等待首条进度' : 'Epoch ' + training.currentEpoch + ' / ' + training.totalEpochs}</span>
+              {training.executionMode === 'simulation' && <span className="train-progress__simulation">演示数据</span>}
+              <strong>{progress.toFixed(1)}%</strong>
             </div>
-
-            {/* 进度条 */}
-            <div
-              style={{
-                height: '8px',
-                backgroundColor: '#0f3460',
-                borderRadius: '4px',
-                overflow: 'hidden',
-              }}
-            >
-              <div
-                style={{
-                  width: `${progressPercent}%`,
-                  height: '100%',
-                  backgroundColor: '#3b82f6',
-                  transition: 'width 0.3s ease',
-                }}
-              />
+            <div className="train-progress__track" role="progressbar" aria-label="训练轮次进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress)}>
+              <span style={{ width: progress + '%' }} />
             </div>
-
-            {/* 指标显示 */}
-            <div style={{ display: 'flex', gap: '16px', fontSize: '11px' }}>
-              <div>
-                <span style={{ color: '#94a3b8' }}>Loss: </span>
-                <span style={{ color: 'white', fontFamily: 'monospace' }}>
-                  {currentLoss !== null ? currentLoss.toFixed(4) : '-'}
-                </span>
-              </div>
-              <div>
-                <span style={{ color: '#94a3b8' }}>Acc: </span>
-                <span style={{ color: '#10b981', fontFamily: 'monospace' }}>
-                  {currentAccuracy !== null ? (currentAccuracy * 100).toFixed(1) + '%' : '-'}
-                </span>
-              </div>
+            <div className="train-progress__facts">
+              <span>Loss：{training.metrics.length > 0 && Number.isFinite(training.currentLoss) ? training.currentLoss.toFixed(4) : '不可用'}</span>
+              <span>{latestMetric.label}：{latestMetric.valueText}</span>
+              {elapsed !== null && <span>已用：{formatDuration(elapsed)}</span>}
+              {remaining !== null && remaining > 0 && <span>预计剩余：{formatDuration(remaining)}</span>}
             </div>
-
-            {/* 时间信息 */}
-            {trainStartTime && (
-              <div style={{ display: 'flex', gap: '12px', fontSize: '11px', marginTop: '2px' }}>
-                <div>
-                  <span style={{ color: '#94a3b8' }}>已用：</span>
-                  <span style={{ color: 'white' }}>{formatTime(elapsed)}</span>
-                </div>
-                {progressPercent > 5 && remaining > 0 && (
-                  <div>
-                    <span style={{ color: '#94a3b8' }}>预计剩余：</span>
-                    <span style={{ color: '#f59e0b' }}>{formatTime(remaining)}</span>
-                  </div>
-                )}
-              </div>
-            )}
           </div>
-
-          {/* 停止按钮 */}
-          <button
-            onClick={handleStopTraining}
-            style={{
-              padding: '10px 20px',
-              backgroundColor: '#ef4444',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '13px',
-              fontWeight: 600,
-              transition: 'background-color 0.2s',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = '#dc2626';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = '#ef4444';
-            }}
+          <Button
+            variant="danger"
+            size="medium"
+            className="train-progress__action"
+            onClick={stopTrainingRun}
+            disabled={training.status === 'stopping'}
           >
-            ⏹ 停止训练
-          </button>
+            {training.status === 'stopping' ? '正在停止…' : '停止训练'}
+          </Button>
         </>
       )}
 
-      {/* 训练完成状态 */}
-      {!isTraining && finalAccuracy !== null && !error && (
+      {!training.isTraining && training.finalAccuracy !== null && !training.error && (
         <>
-          <div style={{ flex: 1 }}>
-            <div style={{ color: '#10b981', fontSize: '14px', fontWeight: 600, marginBottom: '4px' }}>
-              ✅ 训练完成！
-            </div>
-            <div style={{ color: 'white', fontSize: '13px' }}>
-              最终准确率：<span style={{ fontWeight: 600, fontFamily: 'monospace' }}>
-                {(finalAccuracy * 100).toFixed(1)}%
-              </span>
-            </div>
+          <div className="train-progress__main train-progress__completed">
+            <StatusBadge
+              tone={training.executionMode === 'simulation' ? 'warning' : 'success'}
+              label={training.executionMode === 'simulation' ? '演示训练完成' : '训练完成通知'}
+            />
+            <span>
+              {training.finalMetricName && Number.isFinite(training.finalAccuracy)
+                ? training.finalMetricName + '：' + formatStrictMetricValue(training.finalMetricName, training.finalAccuracy)
+                : '完成消息缺少明确指标；请在训练监控查看 Attempt 档案'}
+            </span>
+            <small>这是进程完成通知，不替代严格 validation/epoch 证据。</small>
           </div>
-
-          {/* 重置按钮 */}
-          <button
-            onClick={handleReset}
-            style={{
-              padding: '10px 20px',
-              backgroundColor: '#3b82f6',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '13px',
-              fontWeight: 600,
-              transition: 'background-color 0.2s',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = '#2563eb';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = '#3b82f6';
-            }}
-          >
-            🔄 重置
-          </button>
+          <Button variant="secondary" size="medium" className="train-progress__action" onClick={training.resetTraining}>
+            关闭提示
+          </Button>
         </>
       )}
     </div>

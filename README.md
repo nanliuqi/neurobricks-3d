@@ -1,129 +1,189 @@
-# NeuroBricks 3D — 神经网络三维构建工坊
+# NeuroBricks 3D
 
-**在 3D 空间中拖拽积木搭建神经网络，实时校验张量形状，一键启动 PyTorch 真实训练。**
+**Build neural networks with 3D blocks, validate tensor shapes in real time, and launch real PyTorch training.**
 
-*Build neural networks by stacking 3D blocks — drag, drop, validate tensor shapes in real time, and launch real PyTorch training with one click.*
+在 3D 空间里像搭积木一样搭建神经网络，实时校验张量形状，一键启动真实的 PyTorch 训练。
 
-![Windows](https://img.shields.io/badge/platform-Windows-blue)
-![Tauri](https://img.shields.io/badge/Tauri-v1-FFC131)
-![PyTorch](https://img.shields.io/badge/PyTorch-训练引擎-EE4C2C)
-![License](https://img.shields.io/badge/license-MIT-green)
+**[English](#english) | [中文](#中文)**
 
-![NeuroBricks 3D 主界面](docs/screenshots/training.png)
+## 评审与开发快速入口 / Review quick start
 
-## ✨ 功能特性
+> 本仓库当前源码是本次评审对象。截至 2026-10-25，GitHub Releases 只有 2026-08-20 的历史 Windows setup.exe 附件，尚未发布与当前源码对应的新便携 ZIP。旧安装程序不代表当前教学、课题与结果解读界面；不要用它替代本次源码验收。
+>
+> Review the current source for this submission. The existing August 20 installer is historical; no new portable ZIP matching this source has been published as of October 25, 2026.
 
-### 🧱 可视化搭建
-- **3D 积木拖拽搭建** — 12 种层类型（Conv2D、MaxPool2D、Linear、ReLU、BatchNorm、Dropout、Flatten 等）
-- **8 个经典模型预设** — LeNet-5、AlexNet、VGG-16、ResNet-18、GoogLeNet、MLP、SimpleCNN、U-Net，点击一键生成
-- **实时形状校验** — 层间张量形状自动推导，不匹配时红色高亮 + 期望/实际对比提示
-- **实时 PyTorch 代码面板** — 搭积木的同时实时查看对应 PyTorch 代码，一键复制
+| 你想做什么 / Goal | 入口 / Start here |
+| --- | --- |
+| 从源码启动、区分界面演示与真实训练 | [开发与评审指南](docs/开发与评审指南.md) |
+| 了解第一次如何操作 | [快速上手与常见问题](docs/教学/01-快速上手与常见问题.md) |
+| 准备课堂或现场演示 | [课堂与提交演示脚本](docs/教学/02-课堂与提交演示脚本.md) |
+| 按编号检查功能 | [发布候选人工验收清单](docs/教学/03-发布候选人工验收清单.md) |
+| 运行自动化验证 | [测试指南](TESTING.md) |
 
-### 🚀 真实训练
-- **内置数据集开箱即用** — MNIST / CIFAR-10，选完即训
-- **自定义数据集** — 本地图像文件夹、CSV（支持 UTF-8/GBK 中文编码）、Excel
-- **PyTorch 本地训练** — 独立打包的 Python sidecar，CUDA GPU 自动检测与降级
-- **训练全程可视化** — 实时 Loss/Accuracy 曲线、训练日志、历史记录对比
-- **独立曲线窗口** — 曲线可弹出为独立窗口，自由移动/缩放，训练中实时更新
-- **训练完成报告** — 准确率、Loss、时长、参数量、最佳 Epoch 汇总卡片
+### 历史界面示意 / Historical screenshots
 
-### 🔍 模型推理
-- **模型卡片管理** — 每次训练生成独立模型卡片，多卡并存、重命名、删除、重启不丢失
-- **图片预测** — 选择卡片 + 上传图片，返回 Top-5 类别与置信度
-- **类别语义化** — MNIST 显示数字、CIFAR-10 显示中文类别名
+以下三张是仓库已有的历史界面截图，仅用于说明产品形态，不是本次新增功能的最新实测截图。当前布局与功能以从本次源码启动后的程序为准。
 
-### 💾 导出与工程
-- **代码导出** — 一键生成可运行的 PyTorch / Keras 模型代码
-- **权重导出** — `.pth`（state_dict）/ `.pt`（完整模型）/ `.npz`（NumPy 通用）
-- **项目保存/加载** — `.nbproj` 格式保存网络结构
-- **GPU 检测面板** — CUDA 设备、显存、CPU/内存信息一览
+![历史界面示意：3D 网络搭建](docs/screenshots/scene.png)
+![历史界面示意：训练监控](docs/screenshots/training.png)
+![历史界面示意：模型推理](docs/screenshots/predict.png)
 
-## 🖥️ 技术栈
+<!-- TODO: demo gif — place a ~60s screen recording at assets/demo.gif, then uncomment:
+![Demo](assets/demo.gif)
+-->
 
-| 层级 | 技术 | 说明 |
-|------|------|------|
-| 框架 | Tauri v1 | 轻量桌面壳，Rust 后端 |
-| 前端 | React 18 + TypeScript | UI 与状态管理 |
-| 3D 渲染 | React Three Fiber + Three.js | 三维场景与积木渲染 |
-| 状态管理 | Zustand | 轻量响应式 store |
-| 构建工具 | Vite | 前端开发与构建 |
-| 后端 | Rust | 进程管理、文件系统、事件桥接 |
-| 训练引擎 | Python + PyTorch | sidecar 进程，支持 CUDA |
-| 打包 | PyInstaller + NSIS/MSI | sidecar 独立 exe + Windows 安装包 |
+---
 
-## 📦 安装
+<a id="english"></a>
+## English
 
-从 [Releases](https://github.com/nanliuqi/neurobricks-3d/releases) 页面下载最新安装包：
+### What is NeuroBricks 3D?
 
-- **Windows 安装包**：`NeuroBricks 3D_x.x.x_x64-setup.exe`（双击安装，推荐）
+NeuroBricks 3D is a Windows desktop workbench for one engineer running small-data, single-machine supervised-learning experiments. Build a network with layer components and classic-model presets arranged in network order; tensor shapes are inferred live, and every controlled run is organized as traceable Study → Experiment → Attempt → Claim evidence.
 
-安装包已内置训练引擎与数据集，**无需安装 Python 或任何依赖**，装完即用。
+### Features
 
-> 系统要求：Windows 10/11（64 位）
+- **3D network building** — 12 layer types (Conv2D, MaxPool2D, AvgPool2D, Linear, ReLU, Sigmoid, Tanh, BatchNorm2d, LayerNorm, Dropout, Flatten, Input), automatically arranged in network order
+- **8 classic model presets** — LeNet-5, AlexNet, VGG-16, ResNet-18, GoogLeNet, MLP, SimpleCNN, U-Net encoder (an encoder preset, not a segmentation promise)
+- **Real-time shape validation** — tensor shapes propagate layer by layer; mismatches are highlighted with expected-vs-actual comparison and fix suggestions
+- **Bounded supervised tasks** — image classification from MNIST / CIFAR-10 or custom class folders, plus CSV tabular regression (UTF-8 / GBK auto-detected)
+- **Local PyTorch training** — capability-checked Python environment in source development; verified portable builds bundle their own runtime. Device selection is explicit; unavailable selected CUDA stops startup rather than silently switching to CPU
+- **Trustworthy experiment records** — content fingerprints, sealed test sets, strict comparison groups, Attempt restart lineage, pre-registered claims, three-way statistical verdicts, confusion diagnostics, and append-only audit events
+- **Training visualization** — live loss/accuracy or MAE curves, training logs, and variance-aware comparisons
+- **Classification and regression inference** — image-model cards provide Top-5; CSV regression cards accept features in the recorded order, reuse training-set normalization, and return a single prediction
+- **Live code panel** — see the PyTorch code update in real time as you build; one-click copy
+- **One-way evidence export** — Study reports and experiment manifests preserve provenance/trust labels; modified external reruns never inherit controlled-execution trust
 
-## 📖 快速上手
+### Deliberate boundary
 
-1. **搭建网络** — 左侧积木库拖入层，或展开"经典模型"点击预设一键生成
-2. **选择数据集** — 右侧"📊 数据集"面板选择 MNIST
-3. **开始训练** — 底部训练栏点【🚀 开始训练】，训练监控面板查看实时曲线
-4. **查看曲线** — 点"⧉ 放大查看"弹出独立曲线窗口
-5. **模型推理** — 右侧"🔍 推理"面板，选择模型卡片 + 上传图片即可预测
-6. **导出成果** — 右侧"💾 导出"面板，导出代码或权重文件
+The current product promise is **small datasets, one Windows machine / one consumer GPU, supervised learning**. It supports image classification and bounded CSV regression. It deliberately does not promise detection, segmentation, multi-label classification, LLM fine-tuning, multimodal pipelines, clusters, multi-GPU scheduling, or cloud multi-tenancy.
 
-## 📸 界面预览
+### Tech Stack
 
-| 3D 搭建场景 | 模型推理 |
-|:---:|:---:|
-| ![scene](docs/screenshots/scene.png) | ![predict](docs/screenshots/predict.png) |
+| Layer | Technology | Notes |
+| --- | --- | --- |
+| App shell | Tauri v1 | Lightweight desktop shell, Rust backend |
+| Frontend | React 18 + TypeScript | UI and state management |
+| 3D rendering | React Three Fiber + Three.js | 3D scene and block rendering |
+| State | Zustand | Lightweight reactive stores |
+| Build | Vite | Frontend dev & build |
+| Backend | Rust | Process management, filesystem, event bridge |
+| Training engine | Python + PyTorch | Bundled sidecar, CUDA support |
+| Packaging | PyInstaller + Tauri portable build | Self-contained Windows x64 application package |
 
-## 👨‍💻 开发环境
+### Install
 
-前置要求：Node.js 18+、Rust toolchain（rustup）、Python 3.10+（仅重新打包 sidecar 时需要）
+For this submission, follow the [source development and review guide](docs/开发与评审指南.md). [Releases](https://github.com/nanliuqi/neurobricks-3d/releases) currently provides only the historical August 20, 2026 setup.exe; it is not the current source version. No matching new portable ZIP is linked here because one has not yet been published.
+
+The portable distribution workflow is retained for future builds: extract the complete ZIP, then run `NeuroBricks 3D.exe`. Verified portable builds contain their own training runtime; source clones do not. Compatible NVIDIA drivers are needed for GPU training; select CPU explicitly when appropriate. If a selected CUDA device becomes unavailable, startup is rejected and asks for device reselection.
+
+> System requirements: Windows 10/11 (64-bit)
+
+### Development
+
+Prerequisites: Node.js >=20 (22/24 recommended; checked with 24.16.0). Desktop development additionally needs the Rust MSVC toolchain, Windows C++ Build Tools/SDK and WebView2. A fresh source clone needs a working 64-bit Python 3.12 environment with the sidecar requirements for real training; Python is also required to rebuild the release sidecar.
 
 ```bash
 git clone https://github.com/nanliuqi/neurobricks-3d.git
 cd neurobricks-3d
 
-npm install          # 前端依赖
-npm run tauri dev    # 开发模式（前端 + Tauri）
-npm run tauri build  # 构建安装包
+npm ci               # install the locked frontend dependencies
+npm run dev          # browser UI simulation; does not start Python
+# Configure Python as documented in the guide before real desktop training:
+npm run tauri -- dev # desktop development; not browser simulation
 ```
 
-## 📁 项目结构
+See the [guide](docs/开发与评审指南.md) for `.venv`, `NEUROBRICKS_PYTHON`, capability checks, dataset downloads, tests and packaging. Development selects only a capability-checked runtime. `npm run package:windows` separately creates and verifies an isolated, version-pinned CUDA sidecar before building the portable app; it does not borrow an end user's Python.
 
-```
-neurobricks-3d/
-├── src/                    # 前端源码
-│   ├── components/
-│   │   ├── scene3d/        # 3D 场景（积木、连接线、粒子）
-│   │   ├── panels/         # 侧边面板（参数/数据集/导出/推理/代码）
-│   │   ├── training/       # 训练相关（监控、曲线、结果卡片）
-│   │   └── layout/         # 布局（标题栏、主框架）
-│   ├── stores/             # Zustand 状态管理
-│   ├── utils/              # 形状推导、代码生成、类别标签
-│   └── types/              # TypeScript 类型定义
-├── src-tauri/              # Tauri 后端
-│   ├── src/commands/       # Rust 命令（训练/推理/GPU/数据集/导出）
-│   └── sidecars/nb-trainer/# Python 训练 sidecar（PyTorch）
-└── public/chart.html       # 独立曲线窗口页面
-```
+### Roadmap
 
-## 🗺️ 路线图
+- [x] Strict Study / Experiment / Attempt / Claim evidence chain
+- [x] Sealed-test claim adjudication and confusion diagnostics
+- [ ] Cluster/block bootstrap for correlated group or temporal samples
+- [ ] Understanding engine — feature map visualization
 
-- [x] 3D 积木搭建与实时形状校验
-- [x] 内置数据集 + PyTorch 本地训练（CUDA 支持）
-- [x] 训练可视化（曲线、日志、历史、独立曲线窗口）
-- [x] 模型推理（图片预测 + 模型卡片管理）
-- [x] 代码/权重导出、项目保存加载
-- [ ] 云端训练（SSH 远程服务器）
-- [ ] 更多层类型（LSTM、Transformer、Embedding）
-- [ ] 训练超参搜索
-- [ ] macOS / Linux 支持
+Task gamification and SSH training remain backlog ideas, not current product commitments.
 
-## 📄 License
+### License
 
 [MIT](LICENSE) © nanliuqi
 
 ---
 
-如果这个项目对你有帮助，欢迎 ⭐ Star 支持一下！
+<a id="中文"></a>
+## 中文
+
+### NeuroBricks 3D 是什么？
+
+一款服务于“小数据、单机单卡、监督式学习”的 Windows 实验工作台，面向小团队里一个人扛起 AI 模块的工程师。通过层组件库和经典模型预设构建按网络顺序排列的 3D 结构，张量形状实时推导；每次受控训练则自动进入 Study → Experiment → Attempt → Claim 的可追溯证据链。
+
+### 功能特性
+
+- **3D 积木搭建** — 12 种层类型（Conv2D、MaxPool2D、AvgPool2D、Linear、ReLU、Sigmoid、Tanh、BatchNorm2d、LayerNorm、Dropout、Flatten、Input），按网络顺序排列
+- **8 个经典模型预设** — LeNet-5、AlexNet、VGG-16、ResNet-18、GoogLeNet、MLP、SimpleCNN、U-Net 编码器（仅编码器预设，不承诺分割任务）
+- **实时形状校验** — 张量形状逐层推导，参数不匹配时红色高亮 + 期望/实际对比 + 修复建议
+- **有边界的监督任务** — MNIST / CIFAR-10 与自定义类别文件夹用于图像分类；CSV 用于表格监督回归（UTF-8 / GBK 自动识别）
+- **本地 PyTorch 训练** — 源码开发使用通过能力探测的 Python 环境，已验证便携构建使用独立内置运行时；设备明确选择，已选 CUDA 失效时拒绝启动而非静默降级
+- **可信实验档案** — 数据内容指纹、封存测试集、严格可比分组、Attempt 重启谱系、主张预注册、三值统计裁决、混淆诊断与只追加审计
+- **训练可视化** — 实时 Loss/Accuracy 或 MAE 曲线、训练日志与带方差提示的实验对比
+- **分类与回归推理** — 图像分类卡片提供 Top-5；CSV 回归卡片按训练时特征顺序接收原始数值并复用训练集标准化参数，输出单一预测值
+- **实时代码面板** — 搭积木的同时实时查看对应 PyTorch 代码，一键复制
+- **单向证据导出** — Study 报告与实验 manifest 保留来源和可信等级；导出后修改并在外部重跑不会继承受控执行身份
+
+### 刻意边界
+
+当前产品承诺锁在 **小数据集、Windows 单机单张消费级显卡、监督式学习**：做深图像分类与有界 CSV 回归；明确不承诺检测、分割、多标签分类、LLM 微调、多模态、集群、多 GPU 调度或云多租户。
+
+### 技术栈
+
+| 层级 | 技术 | 说明 |
+| --- | --- | --- |
+| 应用外壳 | Tauri v1 | 轻量桌面壳，Rust 后端 |
+| 前端 | React 18 + TypeScript | UI 与状态管理 |
+| 3D 渲染 | React Three Fiber + Three.js | 三维场景与积木渲染 |
+| 状态管理 | Zustand | 轻量响应式 store |
+| 构建工具 | Vite | 前端开发与构建 |
+| 后端 | Rust | 进程管理、文件系统、事件桥接 |
+| 训练引擎 | Python + PyTorch | 内置 sidecar，支持 CUDA |
+| 打包 | PyInstaller + Tauri 便携构建 | 自包含 Windows x64 应用包 |
+
+### 安装
+
+本次请按[开发与评审指南](docs/开发与评审指南.md)从源码启动。[Releases](https://github.com/nanliuqi/neurobricks-3d/releases) 截至 2026-10-25 仅有 2026-08-20 的历史 Windows setup.exe，不能代替当前源码；当前没有与本次源码对应的新便携 ZIP 下载入口。
+
+保留的便携分发流程用于后续构建：完整解压 ZIP，再运行 `NeuroBricks 3D.exe`。已验证便携构建包含独立训练运行时，最终用户无需安装 Python；源码克隆不含此运行时。GPU 训练需要兼容的 NVIDIA 驱动，也可明确选择 CPU；已选 CUDA 不可用时须重新选择设备，不会静默改用 CPU。
+
+> 系统要求：Windows 10/11（64 位）
+
+### 开发环境
+
+前置要求：Node.js >=20（推荐 22/24，已在 24.16.0 检查）。桌面开发还需 Rust MSVC 工具链、Windows C++ Build Tools/SDK 和 WebView2。源码克隆后进行真实训练或重建发布 sidecar，均需可用的 64 位 Python 3.12 与相应依赖。
+
+```bash
+git clone https://github.com/nanliuqi/neurobricks-3d.git
+cd neurobricks-3d
+
+npm ci               # 按锁文件安装前端依赖
+npm run dev          # 浏览器 UI 模拟，不启动 Python
+# 按指南配置 Python 后，再进行真实桌面训练：
+npm run tauri -- dev # 桌面开发，不是浏览器模拟
+```
+
+`.venv`、`NEUROBRICKS_PYTHON`、能力探测、数据下载、测试和打包步骤见[详细指南](docs/开发与评审指南.md)。开发模式只采用通过能力探测的运行时；`npm run package:windows` 则单独创建并校验隔离、锁版本的 CUDA sidecar，再构建便携应用，不借用最终用户电脑上的 Python。
+
+### 路线图
+
+- [x] Study / Experiment / Attempt / Claim 严格证据链
+- [x] 封存测试集主张裁决与混淆诊断
+- [ ] 面向 group/temporal 相关样本的 cluster/block bootstrap
+- [ ] 理解引擎 — feature map 可视化
+
+任务游戏化与 SSH 云训练只保留在 backlog，不属于当前产品承诺。
+
+### 许可证
+
+[MIT](LICENSE) © nanliuqi
+
+---
+
+如果这个项目对你有帮助，欢迎 ⭐ Star 支持一下！ / If you find this project useful, a ⭐ is much appreciated!

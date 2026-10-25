@@ -3,7 +3,7 @@
     "devPath": "http://localhost:5173",
     "distDir": "../dist",
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build"
+    "beforeBuildCommand": "npm run build && npm run sidecar:verify"
   },
   "package": {
     "productName": "NeuroBricks 3D",
@@ -17,9 +17,8 @@
         "save": true
       },
       "fs": {
-        "readFile": true,
         "writeFile": true,
-        "scope": ["**"]
+        "scope": []
       },
       "window": {
         "all": false,
@@ -30,15 +29,11 @@
         "maximize": true,
         "unmaximize": true,
         "startDragging": true
-      },
-      "shell": {
-        "open": true,
-        "execute": true
       }
 
     },
     "bundle": {
-      "active": true,
+      "active": false,
       "targets": ["msi", "nsis"],
       "identifier": "com.neurobricks3d.app",
       "resources": [
@@ -46,9 +41,9 @@
         "sidecars/nb-trainer/models.py",
         "sidecars/nb-trainer/train.py",
         "sidecars/nb-trainer/predict.py",
+        "sidecars/nb-trainer/protocol.py",
         "sidecars/nb-trainer/requirements.txt",
-        "sidecars/nb-trainer/data/**",
-        "sidecars/dist/nb-trainer/**"
+        "sidecars/nb-trainer/data"
       ],
       "icon": [
         "icons/32x32.png",
@@ -59,7 +54,7 @@
       ]
     },
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; img-src 'self' data: blob: asset: https://asset.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost"
     },
     "updater": {
       "active": false,

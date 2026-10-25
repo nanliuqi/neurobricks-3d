@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { Layer3D, LayerType, LayerParams, LayoutMode, ValidationResult, TensorShape, ShapeValidationError } from '@/types/layer';
 import { BLOCK_STEP, LAYER_META_LIST, DEFAULT_INPUT_SHAPE } from '@/types/layer';
-import { inferOutputShape, computeParamCount, formatShape } from '@/utils/shapeInference';
+import { inferOutputShape, computeParamCount, formatShape, createDerivationFailureError } from '@/utils/shapeInference';
 import { recalcPositions } from '@/utils/snapAlgorithm';
 
 /**
@@ -10,13 +10,11 @@ import { recalcPositions } from '@/utils/snapAlgorithm';
 function recomputeLayerStats(layers: Layer3D[], defaultInputShape: TensorShape = DEFAULT_INPUT_SHAPE): { layers: Layer3D[]; validationResult: ValidationResult } {
   const sorted = [...layers].sort((a, b) => a.order - b.order);
 
-  // 确定输入形状
+  // 确定输入形状：复用同一套推导与合法性检查，不手工拼未校验的维度
   let inputShape: TensorShape | null = defaultInputShape;
   if (sorted.length > 0 && sorted[0].type === 'Input') {
-    const p = sorted[0].params;
-    if (p.inChannels != null && p.inputHeight != null && p.inputWidth != null) {
-      inputShape = [p.inChannels, p.inputHeight, p.inputWidth];
-    }
+    const derived = inferOutputShape('Input', sorted[0].params, defaultInputShape);
+    if (derived) inputShape = derived;
   }
 
   let currentShape: TensorShape | null = inputShape;
@@ -80,18 +78,10 @@ function recomputeLayerStats(layers: Layer3D[], defaultInputShape: TensorShape =
     const outputShape = inferOutputShape(layer.type, layer.params, currentShape);
     const paramCount = computeParamCount(layer.type, layer.params, currentShape);
 
-    // 形状推导失败（非 Input 层）
-    if (outputShape === null && layer.type !== 'Input') {
+    // 形状推导失败（含 Input 层：Input 失败不能让整张网络显示校验通过）
+    if (outputShape === null) {
       if (!errors.some(e => e.layerId === layer.id)) {
-        errors.push({
-          layerId: layer.id,
-          layerType: layer.type,
-          errorType: 'shape_mismatch',
-          message: `第 ${i + 1} 层 (${layer.type}) 无法推导输出形状，输入形状为 ${formatShape(currentShape)}`,
-          suggestion: '检查前一层的输出形状是否与当前层兼容',
-          expectedInputShape: null,
-          actualInputShape: currentShape,
-        });
+        errors.push(createDerivationFailureError(layer, i, currentShape));
       }
     }
 
@@ -141,6 +131,13 @@ interface LayerState {
   clearAllLayers: () => void;
   recalcAll: () => void;
   recomputeLayerStats: () => void;
+  /**
+   * 适配提交入口（模块 05 验收补丁）：先在内存完成全部统计计算，
+   * 成功后仅执行一次 set，避免“新 layers + 旧统计”的可观察中间状态；
+   * 计算失败时直接抛出且不写入任何状态。不修改 selectedId，
+   * 不重排积木的 id / order / position，不引入第二套形状推导。
+   */
+  applyAdaptedLayers: (adapted: Layer3D[]) => void;
   triggerFlash: () => void;
   loadProject: (config: { layers: Layer3D[]; layoutMode: LayoutMode }) => void;
   setValidationResult: (result: ValidationResult) => void;
@@ -367,6 +364,15 @@ export const useLayerStore = create<LayerState>()((set, get) => ({
 
       return { layers: computedLayers, validationResult, totalParams, hasShapeError };
     });
+  },
+
+  // 适配原子提交：先在内存算完（失败即抛出、不写 store），再一次 set 提交全部派生状态。
+  applyAdaptedLayers: (adapted) => {
+    const { layers: computedLayers, validationResult } = recomputeLayerStats(adapted);
+    const totalParams = computedLayers.reduce((sum, l) => sum + l.paramCount, 0);
+    const hasShapeError = validationResult.errors.length > 0;
+
+    set({ layers: computedLayers, validationResult, totalParams, hasShapeError });
   },
 
   // 触发积木闪光（epoch 完成时调用）

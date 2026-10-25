@@ -1,0 +1,1217 @@
+[
+  {
+    "id": "lenet5",
+    "name": "LeNet-5",
+    "dataset": "mnist",
+    "inputShape": [
+      1,
+      28,
+      28
+    ],
+    "layers": [
+      {
+        "type": "Input",
+        "params": {
+          "inChannels": 1,
+          "inputHeight": 28,
+          "inputWidth": 28
+        }
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 1,
+          "outChannels": 6,
+          "kernelSize": 5,
+          "padding": 0
+        }
+      },
+      {
+        "type": "AvgPool2D",
+        "params": {
+          "poolKernelSize": 2,
+          "poolStride": 2
+        }
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 6,
+          "outChannels": 16,
+          "kernelSize": 5,
+          "padding": 0
+        }
+      },
+      {
+        "type": "AvgPool2D",
+        "params": {
+          "poolKernelSize": 2,
+          "poolStride": 2
+        }
+      },
+      {
+        "type": "Flatten",
+        "params": {}
+      },
+      {
+        "type": "Linear",
+        "params": {
+          "inFeatures": 256,
+          "outFeatures": 120
+        }
+      },
+      {
+        "type": "Tanh",
+        "params": {}
+      },
+      {
+        "type": "Linear",
+        "params": {
+          "inFeatures": 120,
+          "outFeatures": 84
+        }
+      },
+      {
+        "type": "Tanh",
+        "params": {}
+      },
+      {
+        "type": "Linear",
+        "params": {
+          "inFeatures": 84,
+          "outFeatures": 10
+        }
+      }
+    ]
+  },
+  {
+    "id": "alexnet",
+    "name": "AlexNet",
+    "dataset": "cifar10",
+    "inputShape": [
+      3,
+      224,
+      224
+    ],
+    "layers": [
+      {
+        "type": "Input",
+        "params": {
+          "inChannels": 3,
+          "inputHeight": 224,
+          "inputWidth": 224
+        }
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 3,
+          "outChannels": 64,
+          "kernelSize": 11,
+          "stride": 4,
+          "padding": 2
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "MaxPool2D",
+        "params": {
+          "poolKernelSize": 3,
+          "poolStride": 2
+        }
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 64,
+          "outChannels": 192,
+          "kernelSize": 5,
+          "padding": 2
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "MaxPool2D",
+        "params": {
+          "poolKernelSize": 3,
+          "poolStride": 2
+        }
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 192,
+          "outChannels": 384,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 384,
+          "outChannels": 256,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 256,
+          "outChannels": 256,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "MaxPool2D",
+        "params": {
+          "poolKernelSize": 3,
+          "poolStride": 2
+        }
+      },
+      {
+        "type": "Flatten",
+        "params": {}
+      },
+      {
+        "type": "Linear",
+        "params": {
+          "inFeatures": 9216,
+          "outFeatures": 4096
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Dropout",
+        "params": {
+          "dropRate": 0.5
+        }
+      },
+      {
+        "type": "Linear",
+        "params": {
+          "inFeatures": 4096,
+          "outFeatures": 4096
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Dropout",
+        "params": {
+          "dropRate": 0.5
+        }
+      },
+      {
+        "type": "Linear",
+        "params": {
+          "inFeatures": 4096,
+          "outFeatures": 1000
+        }
+      }
+    ]
+  },
+  {
+    "id": "vgg16",
+    "name": "VGG-16",
+    "dataset": "cifar10",
+    "inputShape": [
+      3,
+      32,
+      32
+    ],
+    "layers": [
+      {
+        "type": "Input",
+        "params": {
+          "inChannels": 3,
+          "inputHeight": 32,
+          "inputWidth": 32
+        }
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 3,
+          "outChannels": 64,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 64,
+          "outChannels": 64,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "MaxPool2D",
+        "params": {
+          "poolKernelSize": 2,
+          "poolStride": 2
+        }
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 64,
+          "outChannels": 128,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 128,
+          "outChannels": 128,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "MaxPool2D",
+        "params": {
+          "poolKernelSize": 2,
+          "poolStride": 2
+        }
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 128,
+          "outChannels": 256,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 256,
+          "outChannels": 256,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 256,
+          "outChannels": 256,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "MaxPool2D",
+        "params": {
+          "poolKernelSize": 2,
+          "poolStride": 2
+        }
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 256,
+          "outChannels": 512,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 512,
+          "outChannels": 512,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 512,
+          "outChannels": 512,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "MaxPool2D",
+        "params": {
+          "poolKernelSize": 2,
+          "poolStride": 2
+        }
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 512,
+          "outChannels": 512,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 512,
+          "outChannels": 512,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 512,
+          "outChannels": 512,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "MaxPool2D",
+        "params": {
+          "poolKernelSize": 2,
+          "poolStride": 2
+        }
+      },
+      {
+        "type": "Flatten",
+        "params": {}
+      },
+      {
+        "type": "Linear",
+        "params": {
+          "inFeatures": 512,
+          "outFeatures": 4096
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Dropout",
+        "params": {
+          "dropRate": 0.5
+        }
+      },
+      {
+        "type": "Linear",
+        "params": {
+          "inFeatures": 4096,
+          "outFeatures": 4096
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Dropout",
+        "params": {
+          "dropRate": 0.5
+        }
+      },
+      {
+        "type": "Linear",
+        "params": {
+          "inFeatures": 4096,
+          "outFeatures": 1000
+        }
+      }
+    ]
+  },
+  {
+    "id": "resnet18",
+    "name": "ResNet-18",
+    "dataset": "cifar10",
+    "inputShape": [
+      3,
+      32,
+      32
+    ],
+    "layers": [
+      {
+        "type": "Input",
+        "params": {
+          "inChannels": 3,
+          "inputHeight": 32,
+          "inputWidth": 32
+        }
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 3,
+          "outChannels": 64,
+          "kernelSize": 7,
+          "stride": 2,
+          "padding": 3
+        }
+      },
+      {
+        "type": "BatchNorm2d",
+        "params": {
+          "numFeatures": 64
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "MaxPool2D",
+        "params": {
+          "poolKernelSize": 3,
+          "poolStride": 2,
+          "padding": 1
+        }
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 64,
+          "outChannels": 64,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "BatchNorm2d",
+        "params": {
+          "numFeatures": 64
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 64,
+          "outChannels": 64,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "BatchNorm2d",
+        "params": {
+          "numFeatures": 64
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 64,
+          "outChannels": 128,
+          "kernelSize": 3,
+          "stride": 2,
+          "padding": 1
+        }
+      },
+      {
+        "type": "BatchNorm2d",
+        "params": {
+          "numFeatures": 128
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 128,
+          "outChannels": 128,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "BatchNorm2d",
+        "params": {
+          "numFeatures": 128
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 128,
+          "outChannels": 256,
+          "kernelSize": 3,
+          "stride": 2,
+          "padding": 1
+        }
+      },
+      {
+        "type": "BatchNorm2d",
+        "params": {
+          "numFeatures": 256
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 256,
+          "outChannels": 256,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "BatchNorm2d",
+        "params": {
+          "numFeatures": 256
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 256,
+          "outChannels": 512,
+          "kernelSize": 3,
+          "stride": 2,
+          "padding": 1
+        }
+      },
+      {
+        "type": "BatchNorm2d",
+        "params": {
+          "numFeatures": 512
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 512,
+          "outChannels": 512,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "BatchNorm2d",
+        "params": {
+          "numFeatures": 512
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Flatten",
+        "params": {}
+      },
+      {
+        "type": "Linear",
+        "params": {
+          "inFeatures": 512,
+          "outFeatures": 1000
+        }
+      }
+    ]
+  },
+  {
+    "id": "simplecnn",
+    "name": "SimpleCNN",
+    "dataset": "mnist",
+    "inputShape": [
+      1,
+      28,
+      28
+    ],
+    "layers": [
+      {
+        "type": "Input",
+        "params": {
+          "inChannels": 1,
+          "inputHeight": 28,
+          "inputWidth": 28
+        }
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 1,
+          "outChannels": 32,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "MaxPool2D",
+        "params": {
+          "poolKernelSize": 2,
+          "poolStride": 2
+        }
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 32,
+          "outChannels": 64,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "MaxPool2D",
+        "params": {
+          "poolKernelSize": 2,
+          "poolStride": 2
+        }
+      },
+      {
+        "type": "Flatten",
+        "params": {}
+      },
+      {
+        "type": "Linear",
+        "params": {
+          "inFeatures": 3136,
+          "outFeatures": 128
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Dropout",
+        "params": {
+          "dropRate": 0.5
+        }
+      },
+      {
+        "type": "Linear",
+        "params": {
+          "inFeatures": 128,
+          "outFeatures": 10
+        }
+      }
+    ]
+  },
+  {
+    "id": "mlp",
+    "name": "MLP",
+    "dataset": "mnist",
+    "inputShape": [
+      1,
+      28,
+      28
+    ],
+    "layers": [
+      {
+        "type": "Input",
+        "params": {
+          "inChannels": 1,
+          "inputHeight": 28,
+          "inputWidth": 28
+        }
+      },
+      {
+        "type": "Flatten",
+        "params": {}
+      },
+      {
+        "type": "Linear",
+        "params": {
+          "inFeatures": 784,
+          "outFeatures": 256
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Dropout",
+        "params": {
+          "dropRate": 0.2
+        }
+      },
+      {
+        "type": "Linear",
+        "params": {
+          "inFeatures": 256,
+          "outFeatures": 128
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Dropout",
+        "params": {
+          "dropRate": 0.2
+        }
+      },
+      {
+        "type": "Linear",
+        "params": {
+          "inFeatures": 128,
+          "outFeatures": 10
+        }
+      }
+    ]
+  },
+  {
+    "id": "googlenet",
+    "name": "GoogLeNet",
+    "dataset": "cifar10",
+    "inputShape": [
+      3,
+      224,
+      224
+    ],
+    "layers": [
+      {
+        "type": "Input",
+        "params": {
+          "inChannels": 3,
+          "inputHeight": 224,
+          "inputWidth": 224
+        }
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 3,
+          "outChannels": 64,
+          "kernelSize": 7,
+          "stride": 2,
+          "padding": 3
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "MaxPool2D",
+        "params": {
+          "poolKernelSize": 3,
+          "poolStride": 2
+        }
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 64,
+          "outChannels": 64,
+          "kernelSize": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 64,
+          "outChannels": 192,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "MaxPool2D",
+        "params": {
+          "poolKernelSize": 3,
+          "poolStride": 2
+        }
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 192,
+          "outChannels": 256,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 256,
+          "outChannels": 480,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "MaxPool2D",
+        "params": {
+          "poolKernelSize": 2,
+          "poolStride": 2
+        }
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 480,
+          "outChannels": 512,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 512,
+          "outChannels": 512,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "MaxPool2D",
+        "params": {
+          "poolKernelSize": 2,
+          "poolStride": 2
+        }
+      },
+      {
+        "type": "Flatten",
+        "params": {}
+      },
+      {
+        "type": "Linear",
+        "params": {
+          "inFeatures": 18432,
+          "outFeatures": 1024
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Dropout",
+        "params": {
+          "dropRate": 0.4
+        }
+      },
+      {
+        "type": "Linear",
+        "params": {
+          "inFeatures": 1024,
+          "outFeatures": 1000
+        }
+      }
+    ]
+  },
+  {
+    "id": "unet",
+    "name": "U-Net (编码器)",
+    "dataset": null,
+    "inputShape": null,
+    "excluded": "无内置分割数据集，U-Net 需要分割任务数据，由后续批次处理",
+    "layers": [
+      {
+        "type": "Input",
+        "params": {
+          "inChannels": 1,
+          "inputHeight": 256,
+          "inputWidth": 256
+        }
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 1,
+          "outChannels": 64,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 64,
+          "outChannels": 64,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "MaxPool2D",
+        "params": {
+          "poolKernelSize": 2,
+          "poolStride": 2
+        }
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 64,
+          "outChannels": 128,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 128,
+          "outChannels": 128,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "MaxPool2D",
+        "params": {
+          "poolKernelSize": 2,
+          "poolStride": 2
+        }
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 128,
+          "outChannels": 256,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 256,
+          "outChannels": 256,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "MaxPool2D",
+        "params": {
+          "poolKernelSize": 2,
+          "poolStride": 2
+        }
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 256,
+          "outChannels": 512,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 512,
+          "outChannels": 512,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "MaxPool2D",
+        "params": {
+          "poolKernelSize": 2,
+          "poolStride": 2
+        }
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 512,
+          "outChannels": 1024,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      },
+      {
+        "type": "Conv2D",
+        "params": {
+          "inChannels": 1024,
+          "outChannels": 1024,
+          "kernelSize": 3,
+          "padding": 1
+        }
+      },
+      {
+        "type": "ReLU",
+        "params": {}
+      }
+    ]
+  }
+]

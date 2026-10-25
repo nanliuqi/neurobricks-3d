@@ -2,67 +2,272 @@ import type { LayerType, LayerParams, TensorShape, Layer3D, ShapeValidationError
 import { DEFAULT_INPUT_SHAPE } from '@/types/layer';
 
 /**
- * 前向推导输出形状
- * @param type - 层类型
- * @param params - 层参数
- * @param inputShape - 输入形状 [C, H, W] 或 [N]
- * @returns 输出形状，如果无法推导返回 null
+ * 维度合法资格：有限正整数。用安全整数上界同时排除
+ * NaN / Infinity / 小数 / 0 / 负数 / 溢出后的非精确整数。
  */
-export function inferOutputShape(
+export function isFinitePositiveInteger(value: unknown): value is number {
+  if (typeof value !== 'number') return false;
+  return Number.isSafeInteger(value) && value > 0;
+}
+
+/** 填充这类允许 0 的量：有限非负整数。 */
+export function isFiniteNonNegativeInteger(value: unknown): value is number {
+  if (typeof value !== 'number') return false;
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+/** 一份能当作张量形状使用的记录：非空数组，且每一维都是有限正整数。 */
+export function isValidTensorShape(shape: unknown): shape is TensorShape {
+  if (!Array.isArray(shape) || shape.length === 0) return false;
+  return shape.every(isFinitePositiveInteger);
+}
+
+function asPositiveInteger(value: unknown): number | null {
+  return isFinitePositiveInteger(value) ? value : null;
+}
+
+function asNonNegativeInteger(value: unknown): number | null {
+  return isFiniteNonNegativeInteger(value) ? value : null;
+}
+
+/** 参与形状推导的参数字段（别名解析后的正式字段名）。 */
+export type ShapeOperandField =
+  | 'outChannels'
+  | 'kernelSize'
+  | 'stride'
+  | 'padding'
+  | 'poolKernelSize'
+  | 'poolStride'
+  | 'outFeatures'
+  | 'inChannels'
+  | 'inputHeight'
+  | 'inputWidth';
+
+type OperandRequirement = 'positive-integer' | 'non-negative-integer';
+
+const SHAPE_OPERAND_RULES: Partial<Record<LayerType, ReadonlyArray<{ field: ShapeOperandField; requirement: OperandRequirement }>>> = {
+  Conv2D: [
+    { field: 'outChannels', requirement: 'positive-integer' },
+    { field: 'kernelSize', requirement: 'positive-integer' },
+    { field: 'stride', requirement: 'positive-integer' },
+    { field: 'padding', requirement: 'non-negative-integer' },
+  ],
+  MaxPool2D: [
+    { field: 'poolKernelSize', requirement: 'positive-integer' },
+    { field: 'poolStride', requirement: 'positive-integer' },
+    { field: 'padding', requirement: 'non-negative-integer' },
+  ],
+  AvgPool2D: [
+    { field: 'poolKernelSize', requirement: 'positive-integer' },
+    { field: 'poolStride', requirement: 'positive-integer' },
+    { field: 'padding', requirement: 'non-negative-integer' },
+  ],
+  Linear: [{ field: 'outFeatures', requirement: 'positive-integer' }],
+  Input: [
+    { field: 'inChannels', requirement: 'positive-integer' },
+    { field: 'inputHeight', requirement: 'positive-integer' },
+    { field: 'inputWidth', requirement: 'positive-integer' },
+  ],
+};
+
+/** 兼容别名只在这里解析，推导与非法值审计共用同一份解析结果。 */
+function resolveShapeOperands(
   type: LayerType,
-  params: LayerParams,
+  params: LayerParams
+): Partial<Record<ShapeOperandField, unknown>> {
+  switch (type) {
+    case 'Conv2D':
+      return {
+        outChannels: params.outChannels ?? params.filters,
+        kernelSize: params.kernelSize ?? 3,
+        stride: params.stride ?? 1,
+        padding: params.padding ?? 0,
+      };
+    case 'MaxPool2D':
+    case 'AvgPool2D': {
+      const poolKernelSize = params.poolKernelSize ?? params.poolSize ?? 2;
+      return {
+        poolKernelSize,
+        poolStride: params.poolStride ?? poolKernelSize,
+        padding: params.padding ?? 0,
+      };
+    }
+    case 'Linear':
+      return { outFeatures: params.outFeatures ?? params.units ?? params.outputSize };
+    case 'Input':
+      return {
+        inChannels: params.inChannels,
+        inputHeight: params.inputHeight,
+        inputWidth: params.inputWidth,
+      };
+    default:
+      return {};
+  }
+}
+
+export interface ShapeOperandViolation {
+  field: ShapeOperandField;
+  value: unknown;
+  requirement: OperandRequirement;
+}
+
+/**
+ * 找出解析后仍不合法的操作数。未提供（null / undefined）不算违规，沿用原有
+ * 「无法推导」路径，避免把缺参数误报成数值非法；但显式给出的非法值不会被
+ * 合法别名或合法默认值替换，因此一定在这里暴露出来。
+ */
+export function findIllegalShapeOperands(
+  type: LayerType,
+  params: LayerParams
+): ShapeOperandViolation[] {
+  const rules = SHAPE_OPERAND_RULES[type];
+  if (!rules) return [];
+
+  const resolved = resolveShapeOperands(type, params);
+  const violations: ShapeOperandViolation[] = [];
+  for (const rule of rules) {
+    const value = resolved[rule.field];
+    if (value === null || value === undefined) continue;
+    const legal =
+      rule.requirement === 'positive-integer'
+        ? isFinitePositiveInteger(value)
+        : isFiniteNonNegativeInteger(value);
+    if (!legal) violations.push({ field: rule.field, value, requirement: rule.requirement });
+  }
+  return violations;
+}
+
+export function describeShapeOperandViolation(violation: ShapeOperandViolation): string {
+  const requirementText =
+    violation.requirement === 'positive-integer'
+      ? '必须是有限正整数'
+      : '必须是有限非负整数（允许 0）';
+  const valueText = typeof violation.value === 'string' ? JSON.stringify(violation.value) : String(violation.value);
+  return `${violation.field}（当前值 ${valueText}）${requirementText}`;
+}
+
+/**
+ * 推导失败的错误记录，按检查方向分流：
+ * 本层参数值非法 / 上游形状不可用 / 本层参数与上游形状不相容。
+ * 不复用 missing_flatten，避免把所有失败都说成缺少 Flatten。
+ */
+export function createDerivationFailureError(
+  layer: { id: string; type: LayerType; params: LayerParams },
+  index: number,
   inputShape: TensorShape | null
-): TensorShape | null {
-  // 输入为 null 时返回 null
-  if (!inputShape || inputShape.length === 0) {
-    return null;
+): ShapeValidationError {
+  const violations = findIllegalShapeOperands(layer.type, layer.params);
+  if (violations.length > 0) {
+    return {
+      layerId: layer.id,
+      layerType: layer.type,
+      errorType: 'invalid_dimension',
+      message: `第 ${index + 1} 层 (${layer.type}) 本层参数值非法，无法推导输出形状：${violations
+        .map(describeShapeOperandViolation)
+        .join('；')}`,
+      suggestion: `将 ${violations.map(violation => violation.field).join('、')} 改为合法整数后重试`,
+      expectedInputShape: null,
+      actualInputShape: inputShape,
+    };
   }
 
+  if (!isValidTensorShape(inputShape)) {
+    return {
+      layerId: layer.id,
+      layerType: layer.type,
+      errorType: 'shape_mismatch',
+      message: `第 ${index + 1} 层 (${layer.type}) 无法推导输出形状，输入形状为 ${formatShape(inputShape)}`,
+      suggestion: '检查前一层的输出形状是否与当前层兼容',
+      expectedInputShape: null,
+      actualInputShape: inputShape,
+    };
+  }
+
+  return {
+    layerId: layer.id,
+    layerType: layer.type,
+    errorType: 'shape_mismatch',
+    message: `第 ${index + 1} 层 (${layer.type}) 的本层参数与上游输出形状 ${formatShape(inputShape)} 不相容，无法推导输出形状`,
+    suggestion: '检查本层参数是否完整，以及前一层的输出形状是否与当前层兼容',
+    expectedInputShape: null,
+    actualInputShape: inputShape,
+  };
+}
+
+/** BigInt 向下取整除法：保持与 Math.floor 一致的负数语义（核大于输入时仍得到 ≤ 0）。 */
+function floorDivide(numerator: bigint, denominator: bigint): bigint {
+  const quotient = numerator / denominator;
+  const negative = (numerator < 0n) !== (denominator < 0n);
+  return negative && numerator % denominator !== 0n ? quotient - 1n : quotient;
+}
+
+/**
+ * 单条空间维度 floor((size + 2*padding - kernel) / stride) + 1。
+ *
+ * 中间量必须用 BigInt：size、padding、kernel 各自都是合法安全整数，但
+ * size + 2*padding 可能已经越过 double 的精确整数范围，先用 number 计算会
+ * 悄悄丢精度，再把错位的末位伪装成合法安全整数通过出口检查。最终仍只在
+ * 结果本身可精确表示为安全整数时才转回 number；超出范围返回 null 是
+ * 「不可精确表示」，不等于参数非法。
+ */
+function spatialExtent(
+  size: number,
+  kernel: number,
+  stride: number,
+  padding: number
+): number | null {
+  const numerator = BigInt(size) + 2n * BigInt(padding) - BigInt(kernel);
+  const extent = floorDivide(numerator, BigInt(stride)) + 1n;
+  if (extent <= 0n) return null;
+  if (extent > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+  return Number(extent);
+}
+
+/** [C, H, W] 空间维推导：卷积与两种池化共用同一算式。 */
+function deriveSpatialShape(
+  channels: number,
+  inputShape: TensorShape,
+  kernel: number,
+  stride: number,
+  padding: number
+): TensorShape | null {
+  const outH = spatialExtent(inputShape[1], kernel, stride, padding);
+  const outW = spatialExtent(inputShape[2], kernel, stride, padding);
+  if (outH === null || outW === null) return null;
+  return [channels, outH, outW];
+}
+
+function deriveOutputShape(
+  type: LayerType,
+  params: LayerParams,
+  inputShape: TensorShape
+): TensorShape | null {
   switch (type) {
     case 'Conv2D': {
       // Conv2D：[outC, floor((H+2*padding-kernelSize)/stride)+1, floor((W+2*padding-kernelSize)/stride)+1]
-      const inChannels = inputShape[0];
-      if (inChannels === null || inChannels === undefined) return null;
+      if (inputShape.length < 3) return null;
 
-      const outChannels = params.outChannels ?? params.filters;
-      if (outChannels === undefined || outChannels === null) return null;
+      const operands = resolveShapeOperands(type, params);
+      const outChannels = asPositiveInteger(operands.outChannels);
+      const kernelSize = asPositiveInteger(operands.kernelSize);
+      const stride = asPositiveInteger(operands.stride);
+      const padding = asNonNegativeInteger(operands.padding);
+      if (outChannels === null || kernelSize === null || stride === null || padding === null) return null;
 
-      const kernelSize = params.kernelSize ?? 3;
-      const stride = params.stride ?? 1;
-      const padding = params.padding ?? 0;
-
-      const H = inputShape[1];
-      const W = inputShape[2];
-
-      if (H === null || H === undefined || W === null || W === undefined) return null;
-
-      const outH = Math.floor((H + 2 * padding - kernelSize) / stride) + 1;
-      const outW = Math.floor((W + 2 * padding - kernelSize) / stride) + 1;
-
-      if (outH <= 0 || outW <= 0) return null;
-
-      return [outChannels, outH, outW];
+      return deriveSpatialShape(outChannels, inputShape, kernelSize, stride, padding);
     }
 
-    case 'MaxPool2D': {
-      const C = inputShape[0];
-      if (C === null || C === undefined) return null;
+    case 'MaxPool2D':
+    case 'AvgPool2D': {
+      if (inputShape.length < 3) return null;
 
-      const poolKernelSize = params.poolKernelSize ?? params.poolSize ?? 2;
-      const poolStride = params.poolStride ?? poolKernelSize;
-      const padding = params.padding ?? 0;
+      const operands = resolveShapeOperands(type, params);
+      const poolKernelSize = asPositiveInteger(operands.poolKernelSize);
+      const poolStride = asPositiveInteger(operands.poolStride);
+      const padding = asNonNegativeInteger(operands.padding);
+      if (poolKernelSize === null || poolStride === null || padding === null) return null;
 
-      const H = inputShape[1];
-      const W = inputShape[2];
-
-      if (H === null || H === undefined || W === null || W === undefined) return null;
-
-      const outH = Math.floor((H + 2 * padding - poolKernelSize) / poolStride) + 1;
-      const outW = Math.floor((W + 2 * padding - poolKernelSize) / poolStride) + 1;
-
-      if (outH <= 0 || outW <= 0) return null;
-
-      return [C, outH, outW];
+      return deriveSpatialShape(inputShape[0], inputShape, poolKernelSize, poolStride, padding);
     }
 
     case 'Linear': {
@@ -72,8 +277,8 @@ export function inferOutputShape(
       }
 
       // 否则返回 [params.outFeatures]
-      const outFeatures = params.outFeatures ?? params.units ?? params.outputSize;
-      if (outFeatures === undefined || outFeatures === null) return null;
+      const outFeatures = asPositiveInteger(resolveShapeOperands(type, params).outFeatures);
+      if (outFeatures === null) return null;
 
       return [outFeatures];
     }
@@ -92,33 +297,15 @@ export function inferOutputShape(
       return inputShape;
     }
 
-    case 'AvgPool2D': {
-      const C = inputShape[0];
-      if (C === null || C === undefined) return null;
-
-      const poolKernelSize = params.poolKernelSize ?? params.poolSize ?? 2;
-      const poolStride = params.poolStride ?? poolKernelSize;
-      const padding = params.padding ?? 0;
-
-      const H = inputShape[1];
-      const W = inputShape[2];
-
-      if (H === null || H === undefined || W === null || W === undefined) return null;
-
-      const outH = Math.floor((H + 2 * padding - poolKernelSize) / poolStride) + 1;
-      const outW = Math.floor((W + 2 * padding - poolKernelSize) / poolStride) + 1;
-
-      if (outH <= 0 || outW <= 0) return null;
-
-      return [C, outH, outW];
-    }
-
     case 'Input': {
+      // 显式给出的维度非法时直接失败，不允许回落到默认形状把问题藏起来
+      if (findIllegalShapeOperands(type, params).length > 0) return null;
+
       // Input 层：优先使用参数中指定的形状，否则使用默认
       if (params.inChannels != null && params.inputHeight != null && params.inputWidth != null) {
         return [params.inChannels, params.inputHeight, params.inputWidth];
       }
-      if (params.inChannels != null && inputShape && inputShape.length >= 3) {
+      if (params.inChannels != null && inputShape.length >= 3) {
         return [params.inChannels, inputShape[1], inputShape[2]];
       }
       return inputShape;
@@ -128,9 +315,10 @@ export function inferOutputShape(
       // Flatten：将 inputShape 所有元素相乘返回 [product]
       let product = 1;
       for (const dim of inputShape) {
-        if (dim === null || dim === undefined) return null;
         product *= dim;
       }
+      // 连乘可能溢出成不精确整数，溢出结果不算合法形状
+      if (!isFinitePositiveInteger(product)) return null;
       return [product];
     }
 
@@ -140,6 +328,32 @@ export function inferOutputShape(
       return null;
     }
   }
+}
+
+/**
+ * 前向推导输出形状
+ * @param type - 层类型
+ * @param params - 层参数
+ * @param inputShape - 输入形状 [C, H, W] 或 [N]
+ * @returns 输出形状，如果无法推导返回 null
+ */
+export function inferOutputShape(
+  type: LayerType,
+  params: LayerParams,
+  inputShape: TensorShape | null
+): TensorShape | null {
+  // 输入形状缺失或含非法维度时不进入推导，也不经由直通层传播
+  if (!isValidTensorShape(inputShape)) {
+    return null;
+  }
+
+  const derived = deriveOutputShape(type, params, inputShape);
+
+  // 唯一出口检查：非 null 返回值每一维都必须是有限正整数
+  if (!isValidTensorShape(derived)) {
+    return null;
+  }
+  return derived;
 }
 
 /**
@@ -299,15 +513,7 @@ export function validateNetwork(
     const outputShape = inferOutputShape(layerType, layerParams, currentShape);
 
     if (outputShape === null) {
-      errors.push({
-        layerId: layer.id,
-        layerType,
-        errorType: 'shape_mismatch',
-        message: `第 ${i + 1} 层 (${layerType}) 无法推导输出形状，输入形状为 ${formatShape(currentShape)}`,
-        suggestion: '检查前一层的输出形状是否与当前层兼容',
-        expectedInputShape: null,
-        actualInputShape: currentShape,
-      });
+      errors.push(createDerivationFailureError(layer, i, currentShape));
       currentShape = null;
       continue;
     }
@@ -374,6 +580,30 @@ export function adaptLayersToInputShape<T extends { type: LayerType; params?: Pa
     currentShape = inferOutputShape(layer.type, layer.params, currentShape);
   }
 
+  return adapted;
+}
+
+/**
+ * 将层列表适配为 CSV 单目标回归网络。
+ *
+ * 表格输入沿用统一的三维形状协议 [1, 1, featureCount]，并把最后一个 Linear
+ * 的输出维度固定为 1。中间隐藏层保持不变，因此用户仍能比较不同的 MLP 宽度。
+ */
+export function adaptLayersForCsvRegression<
+  T extends { type: LayerType; params?: Partial<LayerParams> }
+>(layers: T[], featureCount: number): T[] {
+  if (!Number.isInteger(featureCount) || featureCount <= 0) {
+    return layers.map(layer => ({ ...layer, params: { ...(layer.params ?? {}) } }));
+  }
+
+  const adapted = adaptLayersToInputShape(layers, [1, 1, featureCount]);
+  for (let index = adapted.length - 1; index >= 0; index -= 1) {
+    const layer = adapted[index];
+    if (layer?.type === 'Linear') {
+      layer.params = { ...(layer.params ?? {}), outFeatures: 1 };
+      break;
+    }
+  }
   return adapted;
 }
 

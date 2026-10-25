@@ -36,6 +36,7 @@ export default function CodePanel() {
       }}>
         <span style={{ color: 'white', fontSize: '14px', fontWeight: 600 }}>PyTorch 代码</span>
         <button
+          type="button"
           onClick={handleCopy}
           disabled={layers.length === 0}
           style={{
@@ -68,7 +69,7 @@ export default function CodePanel() {
             lineHeight: 1.8,
           }}>
             场景中还没有网络层<br />
-            从左侧积木库拖入层或选择经典模型后，<br />这里会实时显示对应的 PyTorch 代码
+            点击左侧积木卡片或选择经典模型后，<br />这里会实时显示对应的 PyTorch 代码
           </div>
         ) : (
           <pre style={{

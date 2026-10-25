@@ -166,6 +166,7 @@ const LayerCard = ({ layer }: LayerCardProps) => {
       ref={setNodeRef}
       {...listeners}
       {...attributes}
+      data-testid={`block-card-${layer.type.toLowerCase()}`}
       onMouseEnter={() => setShowTooltip(true)}
       onMouseLeave={() => setShowTooltip(false)}
       className="group relative bg-gray-800 border border-gray-700 hover:border-gray-600 rounded-lg p-3 cursor-grab active:cursor-grabbing transition-all duration-200 hover:bg-gray-700"
