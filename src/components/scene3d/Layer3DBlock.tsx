@@ -1,6 +1,7 @@
 import { memo, useMemo, useRef, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { RoundedBox, Text } from '@react-three/drei';
+import { RoundedBox } from '@react-three/drei';
+import SceneLabel from './SceneLabel';
 import * as THREE from 'three';
 import { useLayerStore } from '../../stores/useLayerStore';
 import type { Layer3D, LayerType } from '../../types/layer';
@@ -174,38 +175,32 @@ const Layer3DBlock = memo(function Layer3DBlock({ layer }: Layer3DBlockProps) {
       </RoundedBox>
 
       {/* 顶部标签 */}
-      <Text
+      <SceneLabel
+        name="scene-label-title"
         position={[0, BLOCK_HEIGHT / 2 + 0.15, 0]}
         fontSize={0.2}
         color="white"
-        anchorX="center"
-        anchorY="middle"
-      >
-        {label}
-      </Text>
+        text={label}
+      />
 
       {/* 侧面参数摘要 */}
-      <Text
+      <SceneLabel
+        name="scene-label-params"
         position={[0, 0, depth / 2 + 0.01]}
         fontSize={0.12}
         color="#aaa"
-        anchorX="center"
-        anchorY="middle"
-      >
-        {paramSummary}
-      </Text>
+        text={paramSummary}
+      />
 
       {/* 正面输出形状 */}
       {shapeText && (
-        <Text
+        <SceneLabel
+          name="scene-label-shape"
           position={[0, -BLOCK_HEIGHT / 4, depth / 2 + 0.02]}
           fontSize={0.15}
           color="rgba(255,255,255,0.7)"
-          anchorX="center"
-          anchorY="middle"
-        >
-          {shapeText}
-        </Text>
+          text={shapeText}
+        />
       )}
     </group>
   );
