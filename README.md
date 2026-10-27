@@ -8,9 +8,9 @@
 
 ## 评审与开发快速入口 / Review quick start
 
-> 当前可体验版本：[Windows 完整便携候选版 v0.1.0-rc.20261027](https://github.com/nanliuqi/neurobricks-3d/releases/tag/v0.1.0-rc.20261027)，本版修复正式包添加模型后 3D 场景空白的问题，内含 Python/CUDA 训练运行时。请下载两个应用分卷及工具 ZIP，按发布页说明还原。本机正式 EXE 的 3D 交互及断网检查已通过，完整 GUI 与其他机器验收仍待完成。10 月 25 日候选版存在已知 3D 显示缺陷，请使用本修复版；旧版本保留供追溯。
+> 当前可体验版本：[Windows 完整便携候选版 v0.1.0-rc.20261027](https://github.com/nanliuqi/neurobricks-3d/releases/tag/v0.1.0-rc.20261027)，本版修复正式包添加模型后 3D 场景空白的问题，内含 Python/CUDA 训练运行时。请下载发布页的全部应用分卷及工具 ZIP，按发布页说明还原。本机正式 EXE 的 3D 交互及断网检查已通过，完整 GUI 与其他机器验收仍待完成。10 月 25 日候选版存在已知 3D 显示缺陷，请使用本修复版；旧版本保留供追溯。
 >
-> Try the [Windows portable release candidate](https://github.com/nanliuqi/neurobricks-3d/releases/tag/v0.1.0-rc.20261027), with its training runtime included. This build fixes the packaged application showing an empty 3D scene after adding a model. Download both application parts and the tools ZIP. Packaged 3D interactions and process-level offline checks passed on the build machine; complete GUI and other-machine acceptance remain pending. The October 25 candidate has a known 3D display defect; use this fixed candidate. Historical releases are retained.
+> Try the [Windows portable release candidate](https://github.com/nanliuqi/neurobricks-3d/releases/tag/v0.1.0-rc.20261027), with its training runtime included. This build fixes the packaged application showing an empty 3D scene after adding a model. Download all numbered application parts and the tools ZIP. Packaged 3D interactions and process-level offline checks passed on the build machine; complete GUI and other-machine acceptance remain pending. The October 25 candidate has a known 3D display defect; use this fixed candidate. Historical releases are retained.
 
 | 你想做什么 / Goal | 入口 / Start here |
 | --- | --- |
@@ -74,7 +74,7 @@ The current product promise is **small datasets, one Windows machine / one consu
 
 ### Install
 
-Download the [Windows portable release candidate](https://github.com/nanliuqi/neurobricks-3d/releases/tag/v0.1.0-rc.20261027): both `.zip.001` / `.zip.002` parts and `00-Windows-Download-Tools.zip`. Extract the tools ZIP beside the parts, then run `Extract-and-Run.cmd`; it verifies and restores the complete application without overwriting an existing application directory. Reserve at least 15 GiB of free space. GitHub's automatic source archives are for development; see the [source development and review guide](docs/开发与评审指南.md).
+Download the [Windows portable release candidate](https://github.com/nanliuqi/neurobricks-3d/releases/tag/v0.1.0-rc.20261027): all numbered `.zip.001`, `.zip.002`, … parts and `00-Windows-Download-Tools.zip`. Extract the tools ZIP beside the parts, then run `Extract-and-Run.cmd`; it verifies and restores the complete application without overwriting an existing application directory. Reserve at least 15 GiB of free space. GitHub's automatic source archives are for development; see the [source development and review guide](docs/开发与评审指南.md).
 
 After the first extraction, run `NeuroBricks-3D/NeuroBricks 3D.exe` directly. This candidate bundles its own training runtime, so users do not install Python; source clones do not include it. WebView2 Runtime is required. Compatible NVIDIA drivers are needed for GPU training; select CPU explicitly when appropriate. If a selected CUDA device becomes unavailable, startup is rejected and asks for device reselection. Build and runtime checks passed. The packaged EXE also passed focused 3D interaction and process-level offline checks; complete GUI and clean-machine acceptance remain pending.
 
